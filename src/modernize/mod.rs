@@ -109,12 +109,40 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_is_currently_empty() {
-        // Step 3 contract: `Default` returns an empty registry because no
-        // rules are registered yet. Step 4 removes this test (or flips it)
-        // once `register_defaults` populates the 12 canonical rules.
+    fn default_registry_contains_the_canonical_rules() {
+        // Step 4 contract: `Default` now seeds the 11 canonical rules
+        // (12 patterns — `stash save` and `stash save -u` share one impl).
+        // Pick a handful of representative legacy invocations to confirm
+        // the registry wires them up. Per-rule matching is covered in each
+        // rule module's own tests.
         let reg = Registry::default();
-        assert!(reg.first_opinion(&empty_parsed()).is_none());
+        assert!(
+            reg.first_opinion(&parse(&[
+                OsString::from("checkout"),
+                OsString::from("-b"),
+                OsString::from("feat"),
+            ]))
+            .is_some(),
+            "checkout -b should match via default registry"
+        );
+        assert!(
+            reg.first_opinion(&parse(&[
+                OsString::from("stash"),
+                OsString::from("save"),
+                OsString::from("wip"),
+            ]))
+            .is_some(),
+            "stash save should match via default registry"
+        );
+        assert!(
+            reg.first_opinion(&parse(&[
+                OsString::from("remote"),
+                OsString::from("rm"),
+                OsString::from("origin"),
+            ]))
+            .is_some(),
+            "remote rm should match via default registry"
+        );
     }
 
     #[test]
