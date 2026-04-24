@@ -664,6 +664,153 @@ fn system_value_surfaces_when_global_is_unset() {
     );
 }
 
+/// `--local` writes the local layer, which takes precedence over both
+/// global and system when read back.
+#[test]
+fn local_layer_overrides_global_and_system() {
+    let dir = TempDir::new().unwrap();
+    let global_path = dir.path().join("user.toml");
+    let system_path = dir.path().join("sys.toml");
+    let local_path = dir.path().join("local.toml");
+
+    marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--system",
+            "modernize.tips",
+            "false",
+        ])
+        .assert()
+        .success();
+    marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--global",
+            "modernize.tips",
+            "true",
+        ])
+        .assert()
+        .success();
+    marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--local",
+            "modernize.tips",
+            "false",
+        ])
+        .assert()
+        .success();
+
+    let got = marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args(["marshal", "config", "get", "modernize.tips"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&got.stdout).trim(),
+        "false",
+        "local wins over global and system"
+    );
+}
+
+/// `config get --show-origin` reports which layer owns the effective value.
+/// Walks each layer up the precedence chain and confirms the origin label
+/// changes accordingly; falls back to `default` when no layer has the key.
+#[test]
+fn get_show_origin_identifies_the_winning_layer() {
+    let dir = TempDir::new().unwrap();
+    let global_path = dir.path().join("user.toml");
+    let system_path = dir.path().join("sys.toml");
+    let local_path = dir.path().join("local.toml");
+
+    let out = marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "get",
+            "--show-origin",
+            "modernize.tips",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "default\ttrue");
+
+    marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--system",
+            "modernize.tips",
+            "false",
+        ])
+        .assert()
+        .success();
+    let out = marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "get",
+            "--show-origin",
+            "modernize.tips",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "system\tfalse");
+
+    marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--global",
+            "modernize.tips",
+            "true",
+        ])
+        .assert()
+        .success();
+    let out = marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "get",
+            "--show-origin",
+            "modernize.tips",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "global\ttrue");
+
+    marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--local",
+            "modernize.tips",
+            "false",
+        ])
+        .assert()
+        .success();
+    let out = marshal_with_all_isolations(&global_path, &system_path, &local_path)
+        .args([
+            "marshal",
+            "config",
+            "get",
+            "--show-origin",
+            "modernize.tips",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "local\tfalse");
+}
+
 /// When outside a Git repository and without `MARSHAL_LOCAL_CONFIG`, using
 /// `--local` fails cleanly with a message pointing the user at the right
 /// remediation (run inside a repo, or use --global / --system).
