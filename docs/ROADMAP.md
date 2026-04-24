@@ -7,20 +7,20 @@ The product is built in phases, each self-contained and releasable. Each phase e
 **Goal:** scaffold the project, establish architecture, set up tooling.
 
 - [x] Design documents (`ARCHITECTURE.md`, `PRINCIPLES.md`, `GLOSSARY.md`)
-- [ ] Cargo project structure
+- [x] Cargo project structure
 - [ ] Basic CLI skeleton with `clap`
 - [ ] Alias / passthrough mechanism (invoke with any command, forward to git)
-- [ ] Context detection (walk filesystem, find `.workspace/`)
 - [ ] Logging infrastructure
 - [ ] CI pipeline (test, lint, build on major platforms)
 
-**Deliverable:** a binary that can be aliased to `git`, forwards everything transparently, and detects workspace context without doing anything with it yet.
+**Deliverable:** a binary that can be aliased to `git` and forwards every invocation transparently. No workspace awareness yet — context detection is deferred to Phase 2, where it is actually consumed.
 
 ## Phase 1: Wrapper — UX Improvements over Git
 
 **Goal:** useful wrapper for plain Git repos. Pure value-add, no workspace logic required.
 
 - [ ] Command interception with pass-through default
+- [ ] Command modernization suggestions (e.g. `checkout -b` → tip about `switch -c`, `branch -d` → tip about `branch --delete`)
 - [ ] Improved status output (better colors, structure)
 - [ ] Actionable error messages for common Git errors (top 20)
 - [ ] `help` command with context-awareness
@@ -28,12 +28,19 @@ The product is built in phases, each self-contained and releasable. Each phase e
 - [ ] Configuration system (user preferences, project settings)
 - [ ] Output modes: human (colors, interactive) and machine (JSON, scripting)
 
+### Modernization Policy
+
+The wrapper may *observe* legacy command forms (e.g. `git checkout -b`) and print a modernization tip, but by **default it never rewrites the command the user typed** — the invocation is forwarded to Git unchanged. This respects Invariant 8 (Conservative Defaults) from `PRINCIPLES.md` and the "don't improve Git in passthrough" rule from `CLAUDE.md`.
+
+Users who want the wrapper to silently substitute modern equivalents can opt in via configuration (e.g. `marshal config set modernize.rewrite = true`). Opt-in only; no magic by default.
+
 **Deliverable:** a tool that enhances plain Git usage without any workspace features. Adoptable by users who have no intention of using workspaces.
 
 ## Phase 2: Workspace Core — Read-Only Operations
 
 **Goal:** workspace detection and passive operations. No state modification yet.
 
+- [ ] Context detection (walk filesystem upward, find `.workspace/`)
 - [ ] Workspace initialization: `ws init` (creates `.workspace/` structure)
 - [ ] Manifest parsing and validation
 - [ ] State.toml parsing and validation
@@ -108,12 +115,16 @@ The product is built in phases, each self-contained and releasable. Each phase e
 
 ## Release Milestones
 
-- **0.1.0** — Phase 0 + partial Phase 1. Functional alias with some UX improvements.
-- **0.2.0** — Complete Phase 1. Useful standalone wrapper.
-- **0.3.0** — Phase 2 complete. Read-only workspace operations.
-- **0.5.0** — Phase 3 complete. Full workspace model (MVP of workspace product).
-- **0.7.0** — Phase 4 complete. Coordinated operations.
-- **1.0.0** — Phase 5 complete. Production-ready differentiated tool.
+Each release is intentionally small and self-contained. Phases map loosely to milestones — a single phase may span two releases when that produces smaller, more reviewable increments.
+
+- **0.0.0-reserved** — Name reservation on crates.io. No functional code. Published 2026-04-24.
+- **0.1.0** — Phase 0 complete. Pure alias/passthrough: `alias git=marshal` behaves identically to Git for every command. Logging, CI, and release plumbing in place. No UX changes.
+- **0.2.0** — First slice of Phase 1: command interception + modernization suggestions (tip-only by default; opt-in rewrite) + better status output. The wrapper starts having an identity beyond passthrough.
+- **0.3.0** — Phase 1 complete. Actionable error messages, `help`/`what-now`, configuration system, human/JSON output modes. Useful standalone wrapper.
+- **0.4.0** — Phase 2 complete. Context detection, read-only workspace operations (`ws init`, status, log, diff, clone, scope inference, `--explain`).
+- **0.5.0** — Phase 3 complete. Full workspace model (the three zones, branching, switching). MVP of the workspace product.
+- **0.7.0** — Phase 4 complete. Coordinated operations (pull/push/fetch/sync, oplog, undo).
+- **1.0.0** — Phase 5 complete. Differentiating features; production-ready.
 - **1.x+** — Phase 6 features and beyond.
 
 ## Testing Strategy
