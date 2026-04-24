@@ -20,6 +20,7 @@
 //!   concrete sources.
 
 pub mod global;
+pub mod local;
 pub mod source;
 pub mod system;
 
@@ -105,6 +106,17 @@ impl Config {
             ConfigKey::ModernizeRewrite => self.modernize.rewrite = None,
         }
     }
+
+    /// The value *this specific layer* has set for `key`, as a renderable
+    /// string. `None` means the layer is silent about this key — the
+    /// resolver must fall through. Used by `origin_of` to identify which
+    /// layer owns the effective value.
+    pub fn layer_value(&self, key: ConfigKey) -> Option<String> {
+        match key {
+            ConfigKey::ModernizeTips => self.modernize.tips.map(|b| b.to_string()),
+            ConfigKey::ModernizeRewrite => self.modernize.rewrite.map(|b| b.to_string()),
+        }
+    }
 }
 
 // ── Config keys ─────────────────────────────────────────────────────────
@@ -176,14 +188,17 @@ impl ConfigResolver {
 
     /// Default resolver for end-user operation.
     ///
-    /// Layers are registered in low→high precedence order (system below
-    /// global), so `global` overrides `system` during the merge. Step 5c
-    /// adds `local` on top of global.
+    /// Layers are registered in low→high precedence order (system < global
+    /// < local), so local overrides global which overrides system during
+    /// the merge.
     ///
-    /// System-layer construction is best-effort: if the platform can't tell
-    /// us where system config lives (e.g. missing `ProgramData` on Windows),
-    /// we log a warning and skip that layer rather than aborting — the user
-    /// is trying to run `git status`, not configure their box.
+    /// System and local layers are best-effort: when the platform can't
+    /// tell us where system config lives (e.g. missing `ProgramData` on
+    /// Windows) or when we are not inside a Git repository, the respective
+    /// layer is skipped with a `tracing::warn!` rather than aborting. The
+    /// user may be trying to run `git status` — which is valid outside a
+    /// repo, Git just errors — so Marshal must not refuse to launch Git
+    /// because a config layer couldn't be materialised.
     pub fn current_user() -> Result<Self> {
         let mut r = Self::new();
         match system::SystemConfigSource::new() {
@@ -191,6 +206,10 @@ impl ConfigResolver {
             Err(err) => tracing::warn!(%err, "skipping system config layer"),
         }
         r.register(Box::new(global::GlobalConfigSource::new()?));
+        match local::LocalConfigSource::new() {
+            Ok(s) => r.register(Box::new(s)),
+            Err(err) => tracing::debug!(%err, "skipping local config layer"),
+        }
         Ok(r)
     }
 
@@ -208,11 +227,27 @@ impl ConfigResolver {
     }
 
     /// Read one specific layer verbatim (for per-layer introspection).
-    /// Consumed in step 5c when `config get --<level>` ships.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Reserved for future `config get --<level>` support.
     pub fn layer(&self, level: Level) -> Result<Option<Config>> {
         let source = self.source_for(level)?;
         source.load()
+    }
+
+    /// Find the highest-precedence layer that has a value for `key`, if any.
+    /// Returns `(level, value)` for use with `config get --show-origin`.
+    /// `Ok(None)` means no layer has the key set; the caller should report
+    /// the compiled-in default.
+    pub fn origin_of(&self, key: ConfigKey) -> Result<Option<(Level, String)>> {
+        // High precedence first. `sources` is ordered low→high, so iterate
+        // in reverse and return the first hit.
+        for source in self.sources.iter().rev() {
+            if let Some(layer) = source.load()? {
+                if let Some(value) = layer.layer_value(key) {
+                    return Ok(Some((source.level(), value)));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Load → mutate → save one specific layer atomically (via the source's
@@ -231,11 +266,15 @@ impl ConfigResolver {
             .iter()
             .find(|s| s.level() == level)
             .map(|b| b.as_ref())
-            .ok_or_else(|| {
-                anyhow!(
+            .ok_or_else(|| match level {
+                Level::Local => anyhow!(
+                    "local config is only available inside a git repository. \
+                     Run this command from within a repo, or use --global/--system."
+                ),
+                Level::System | Level::Global => anyhow!(
                     "no config source registered for level '{}'. This is a bug.",
                     level.as_str()
-                )
+                ),
             })
     }
 }

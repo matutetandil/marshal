@@ -5,21 +5,20 @@
 //! `list`. All operations in step 5a target the global layer; explicit
 //! `--system` / `--global` / `--local` flags arrive in step 5c.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use std::ffi::OsString;
 use std::process::ExitCode;
 
 use crate::config::{ConfigKey, ConfigResolver, Level};
 
-/// Strip a leading `--system` / `--global` level flag (if present) and return
-/// the target level together with the remaining args. Default level when no
-/// flag is given: `Global`. `--local` is explicitly rejected until step 5c
-/// registers the local layer.
+/// Strip a leading `--system` / `--global` / `--local` level flag (if
+/// present) and return the target level together with the remaining args.
+/// Default level when no flag is given: `Global`.
 fn extract_level_flag(args: &[OsString]) -> Result<(Level, &[OsString])> {
     match args.first().and_then(|a| a.to_str()) {
         Some("--system") => Ok((Level::System, &args[1..])),
         Some("--global") => Ok((Level::Global, &args[1..])),
-        Some("--local") => bail!("--local is not available yet; it lands in 0.2.0 step 5c"),
+        Some("--local") => Ok((Level::Local, &args[1..])),
         _ => Ok((Level::Global, args)),
     }
 }
@@ -52,9 +51,9 @@ fn print_help() {
     println!("marshal config — manage Marshal's configuration.");
     println!();
     println!("Usage:");
-    println!("  git marshal config get <key>");
-    println!("  git marshal config set   [--system|--global] <key> <value>");
-    println!("  git marshal config unset [--system|--global] <key>");
+    println!("  git marshal config get [--show-origin] <key>");
+    println!("  git marshal config set   [--system|--global|--local] <key> <value>");
+    println!("  git marshal config unset [--system|--global|--local] <key>");
     println!("  git marshal config list");
     println!();
     println!("Known keys:");
@@ -62,20 +61,42 @@ fn print_help() {
         println!("  {:<20}  {}", key.as_dotted(), key.description());
     }
     println!();
-    println!("Levels (precedence: system < global):");
-    println!("  --global (default)  per-user config (\\$XDG_CONFIG_HOME/marshal/config.toml)");
+    println!("Levels (precedence: system < global < local):");
+    println!("  --global (default)  per-user config ($XDG_CONFIG_HOME/marshal/config.toml)");
     println!("  --system            machine-wide config (/etc/marshal/config.toml on Unix)");
-    println!();
-    println!("`--local` (per-repo) is reserved for a future release.");
+    println!("  --local             per-repo config (<git-dir>/marshal/config.toml)");
 }
 
 fn handle_get(args: &[OsString]) -> Result<ExitCode> {
-    let key_str = arg_as_str(args, 0, "marshal config get <key>")?;
+    // Optional leading --show-origin flag. Only accepted before the key, for
+    // simplicity (mirrors how --system/--global/--local are positioned).
+    let (show_origin, rest) = if args.first().and_then(|a| a.to_str()) == Some("--show-origin") {
+        (true, &args[1..])
+    } else {
+        (false, args)
+    };
+
+    let usage = "marshal config get [--show-origin] <key>";
+    let key_str = arg_as_str(rest, 0, usage)?;
     let key = ConfigKey::from_dotted(key_str)?;
 
     let resolver = ConfigResolver::current_user()?;
-    let effective = resolver.effective()?;
-    println!("{}", effective.get_effective_string(key));
+
+    if show_origin {
+        // Tab-separated `<origin>\t<value>`. Origin is `system`/`global`/
+        // `local` when some layer has the key set, or `default` when we
+        // fall back to the compiled-in default.
+        match resolver.origin_of(key)? {
+            Some((level, value)) => println!("{}\t{}", level.as_str(), value),
+            None => {
+                let effective = resolver.effective()?;
+                println!("default\t{}", effective.get_effective_string(key));
+            }
+        }
+    } else {
+        let effective = resolver.effective()?;
+        println!("{}", effective.get_effective_string(key));
+    }
     Ok(ExitCode::from(0))
 }
 

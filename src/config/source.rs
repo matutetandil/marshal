@@ -18,8 +18,7 @@ pub enum Level {
     System,
     /// Per-user layer.
     Global,
-    /// Per-repository layer. `#[allow(dead_code)]` until step 5c wires it up.
-    #[allow(dead_code)]
+    /// Per-repository layer (under `<git-dir>/marshal/config.toml`).
     Local,
 }
 

@@ -19,28 +19,27 @@ fn marshal() -> Command {
     Command::cargo_bin("marshal").unwrap()
 }
 
-/// A test-scoped marshal invocation that points `MARSHAL_CONFIG` at a temp
-/// file and clears every other config-related env var. Returns the builder
-/// so callers can `.arg(…)` and `.output()` / `.assert()` normally.
+/// A test-scoped marshal invocation that isolates every config layer from
+/// the host machine. The global path is chosen by the caller; system and
+/// local default to sibling temp paths so tests that don't care about those
+/// layers cannot accidentally read host state.
 fn marshal_with_isolated_config(config_path: &std::path::Path) -> Command {
     let mut cmd = marshal();
     cmd.env("MARSHAL_CONFIG", config_path)
-        // Point system config somewhere unreachable by default so tests that
-        // don't care about it never accidentally read /etc/marshal. Tests
-        // that DO care call `marshal_with_both_config_isolations`.
         .env(
             "MARSHAL_SYSTEM_CONFIG",
             config_path.with_extension("system"),
         )
+        .env("MARSHAL_LOCAL_CONFIG", config_path.with_extension("local"))
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("APPDATA")
         .env_remove("ProgramData");
     cmd
 }
 
-/// Same as [`marshal_with_isolated_config`] but also points
-/// `MARSHAL_SYSTEM_CONFIG` at a caller-specified path. For tests that need to
-/// exercise the system layer explicitly.
+/// Same as [`marshal_with_isolated_config`] but with both `global` and
+/// `system` paths picked by the caller. Local still defaults to a sibling
+/// path.
 fn marshal_with_both_isolations(
     global_path: &std::path::Path,
     system_path: &std::path::Path,
@@ -48,6 +47,27 @@ fn marshal_with_both_isolations(
     let mut cmd = marshal();
     cmd.env("MARSHAL_CONFIG", global_path)
         .env("MARSHAL_SYSTEM_CONFIG", system_path)
+        .env(
+            "MARSHAL_LOCAL_CONFIG",
+            global_path.with_extension("local-unused"),
+        )
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("APPDATA")
+        .env_remove("ProgramData");
+    cmd
+}
+
+/// Full triple-layer isolation: global, system, and local paths all picked
+/// by the caller. For tests that exercise all three layers together.
+fn marshal_with_all_isolations(
+    global_path: &std::path::Path,
+    system_path: &std::path::Path,
+    local_path: &std::path::Path,
+) -> Command {
+    let mut cmd = marshal();
+    cmd.env("MARSHAL_CONFIG", global_path)
+        .env("MARSHAL_SYSTEM_CONFIG", system_path)
+        .env("MARSHAL_LOCAL_CONFIG", local_path)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("APPDATA")
         .env_remove("ProgramData");
@@ -644,14 +664,27 @@ fn system_value_surfaces_when_global_is_unset() {
     );
 }
 
-/// `--local` is reserved for step 5c and must fail cleanly until then.
+/// When outside a Git repository and without `MARSHAL_LOCAL_CONFIG`, using
+/// `--local` fails cleanly with a message pointing the user at the right
+/// remediation (run inside a repo, or use --global / --system).
 #[test]
-fn local_flag_is_rejected_until_step_5c() {
+fn local_flag_fails_cleanly_outside_any_repo() {
+    // This test specifically removes MARSHAL_LOCAL_CONFIG so the binary has
+    // to fall back to git-dir detection — which must fail because the
+    // child's cwd (the repo-less tempdir we pass) contains no .git.
     let dir = TempDir::new().unwrap();
+    let non_repo = TempDir::new().unwrap();
     let global_path = dir.path().join("user.toml");
     let system_path = dir.path().join("sys.toml");
 
-    let output = marshal_with_both_isolations(&global_path, &system_path)
+    let mut cmd = marshal();
+    cmd.env("MARSHAL_CONFIG", &global_path)
+        .env("MARSHAL_SYSTEM_CONFIG", &system_path)
+        .env_remove("MARSHAL_LOCAL_CONFIG")
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("APPDATA")
+        .env_remove("ProgramData")
+        .current_dir(non_repo.path())
         .args([
             "marshal",
             "config",
@@ -659,14 +692,18 @@ fn local_flag_is_rejected_until_step_5c() {
             "--local",
             "modernize.tips",
             "false",
-        ])
-        .output()
-        .unwrap();
-    assert!(!output.status.success(), "--local must reject for now");
+        ]);
+    let output = cmd.output().unwrap();
+
+    assert!(
+        !output.status.success(),
+        "--local outside any repo must fail; stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--local is not available yet"),
-        "stderr explains --local is deferred, got: {stderr}"
+        stderr.contains("local config is only available inside a git repository"),
+        "stderr names the remediation path, got: {stderr}"
     );
 }
 
