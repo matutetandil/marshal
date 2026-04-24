@@ -156,7 +156,11 @@ fn marshal_namespace_no_subcommand_prints_overview() {
         .arg("marshal")
         .output()
         .expect("run marshal marshal");
-    assert!(output.status.success(), "exit 0 expected, got {:?}", output.status);
+    assert!(
+        output.status.success(),
+        "exit 0 expected, got {:?}",
+        output.status
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("marshal"),
@@ -181,8 +185,7 @@ fn marshal_namespace_unknown_subcommand_errors_without_reaching_git() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("unknown subcommand")
-            && stderr.contains("totally-not-a-real-subcommand"),
+        stderr.contains("unknown subcommand") && stderr.contains("totally-not-a-real-subcommand"),
         "stderr names the unknown subcommand, got: {stderr}"
     );
     assert!(
