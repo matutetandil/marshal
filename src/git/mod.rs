@@ -7,6 +7,8 @@
 // we may switch to libgit2 via the `git2` crate. The abstractions here are
 // designed to allow that swap without leaking implementation details.
 
+pub mod parser;
+
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::{Command, Output};
