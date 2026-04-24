@@ -1,6 +1,6 @@
 # Marshal
 
-> Parece monorepo para el dev. Es multi-repo administrado por debajo, con granular scope.
+> Looks like a monorepo for the developer. Is multi-repo administered underneath, with granular scope.
 
 A Git workspace manager that gives you the ergonomics of a monorepo while keeping the architectural benefits of independent repositories.
 
