@@ -94,12 +94,14 @@ fn init_git_repo() -> TempDir {
     tmp
 }
 
-/// `marshal --version` must produce exactly what `git --version` produces.
-/// This is the most basic fidelity check: when aliased to `git`, users see
-/// Git's own version, not Marshal's. (In 0.1.0 Marshal has no voice of its
-/// own; its whole job is to be transparent.)
+/// `marshal --version` preserves `git --version`'s output verbatim and
+/// appends marshal's own version on a new stdout line. Pattern borrowed
+/// from node+npm and php+xdebug: each tool in the chain identifies itself.
+///
+/// stderr stays byte-exact with `git --version` — only the stdout is
+/// augmented.
 #[test]
-fn version_output_matches_git() {
+fn version_output_augments_git_with_marshal_line() {
     let direct = StdCommand::new("git")
         .arg("--version")
         .output()
@@ -110,8 +112,29 @@ fn version_output_matches_git() {
         .expect("run marshal --version");
 
     assert_eq!(direct.status.code(), wrapped.status.code());
-    assert_eq!(direct.stdout, wrapped.stdout);
-    assert_eq!(direct.stderr, wrapped.stderr);
+    assert_eq!(direct.stderr, wrapped.stderr, "stderr remains byte-exact");
+
+    let git_line = String::from_utf8_lossy(&direct.stdout);
+    let wrapped_stdout = String::from_utf8_lossy(&wrapped.stdout);
+    let marshal_line = format!("marshal version {}", env!("CARGO_PKG_VERSION"));
+
+    // Git's version line appears verbatim at the start of the output.
+    assert!(
+        wrapped_stdout.starts_with(git_line.trim_end()),
+        "git's version line must be preserved verbatim, got: {wrapped_stdout}"
+    );
+
+    // Marshal's line appears afterward on stdout.
+    assert!(
+        wrapped_stdout.contains(&marshal_line),
+        "marshal's own version must appear, got: {wrapped_stdout}"
+    );
+    let git_pos = wrapped_stdout.find(git_line.trim_end()).unwrap();
+    let marshal_pos = wrapped_stdout.find(&marshal_line).unwrap();
+    assert!(
+        git_pos < marshal_pos,
+        "git's line precedes marshal's (got git at {git_pos}, marshal at {marshal_pos})"
+    );
 }
 
 /// `marshal status` inside a fresh git repo must match `git status` byte-for-byte.

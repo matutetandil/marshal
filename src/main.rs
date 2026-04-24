@@ -74,7 +74,53 @@ fn main() -> ExitCode {
         args.clone()
     };
 
-    commands::passthrough::run(&forward)
+    // `--version` augmentation. When the user asks `git --version` (no
+    // subcommand), the tradition (php+xdebug, node+npm, …) is for each tool
+    // in the chain to identify itself. After git's own version line lands on
+    // stdout, marshal prints its own. Guarded by `status.success()` so we
+    // don't layer Marshal's line on top of a git failure.
+    let is_version_query = is_version_only_query(&parsed);
+    match commands::passthrough::run_returning_outcome(&forward) {
+        commands::passthrough::Outcome::Ran(status) => {
+            if is_version_query && status.success() {
+                println!("marshal version {}", env!("CARGO_PKG_VERSION"));
+            }
+            exit_code_from(status)
+        }
+        commands::passthrough::Outcome::GitNotFound => ExitCode::from(127),
+    }
+}
+
+/// `true` when the invocation is a pure version query: no subcommand, and
+/// `--version` is one of the global flags. This matches `git --version`,
+/// `git -C /tmp --version`, etc.
+fn is_version_only_query(parsed: &git::parser::ParsedGitInvocation) -> bool {
+    use std::ffi::OsStr;
+    parsed.subcommand.is_none()
+        && parsed
+            .global_flags
+            .iter()
+            .any(|a| a == OsStr::new("--version"))
+}
+
+/// Bridge `ExitStatus` → `ExitCode` so `main` can return directly.
+/// Duplicated from the passthrough module to avoid exposing the mapping as
+/// public API surface — the passthrough owns the canonical version.
+#[cfg(unix)]
+fn exit_code_from(status: std::process::ExitStatus) -> ExitCode {
+    use std::os::unix::process::ExitStatusExt;
+    if let Some(code) = status.code() {
+        ExitCode::from(code.clamp(0, 255) as u8)
+    } else if let Some(sig) = status.signal() {
+        ExitCode::from(128_i32.saturating_add(sig).clamp(0, 255) as u8)
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+#[cfg(not(unix))]
+fn exit_code_from(status: std::process::ExitStatus) -> ExitCode {
+    ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8)
 }
 
 fn init_logging() {
