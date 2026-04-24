@@ -9,11 +9,12 @@
 
 use anyhow::{bail, Context, Result};
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 
 /// Execute a git command in the given directory, capturing output.
 ///
-/// This is the primary building block for all git interactions.
+/// Primary building block for helpers that need to parse git's output. For
+/// forwarding invocations directly to the user, see `commands::passthrough`.
 pub fn run(cwd: &Path, args: &[&str]) -> Result<Output> {
     let output = Command::new("git")
         .current_dir(cwd)
@@ -21,22 +22,6 @@ pub fn run(cwd: &Path, args: &[&str]) -> Result<Output> {
         .output()
         .context("failed to execute git")?;
     Ok(output)
-}
-
-/// Execute a git command passing stdin/stdout/stderr through to the user.
-///
-/// Used for passthrough mode where we want git's output to reach the user
-/// verbatim, including colors and interactive prompts.
-pub fn run_interactive(cwd: &Path, args: &[&str]) -> Result<std::process::ExitStatus> {
-    let status = Command::new("git")
-        .current_dir(cwd)
-        .args(args)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .context("failed to execute git")?;
-    Ok(status)
 }
 
 /// Get the current branch name of a repo, or None if in detached HEAD.

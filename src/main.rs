@@ -1,12 +1,16 @@
-// Entry point for the workspace tool.
-//
-// The tool behaves in two modes:
-//   1. Passthrough: if no workspace context is detected, forward to git unchanged.
-//   2. Workspace-aware: if inside a workspace, apply coordination logic.
-//
-// Context detection happens first, before any command parsing.
+//! Marshal entry point.
+//!
+//! 0.1.0 scope: pure passthrough. Every invocation is forwarded to `git`
+//! verbatim, with stdin/stdout/stderr inherited and the exit code propagated
+//! exactly. Workspace logic, context detection, and command interception all
+//! arrive in later releases (see `docs/ROADMAP.md`).
+//!
+//! The `cli`, `context`, `workspace`, and most of `commands` modules are
+//! scaffolded for those later releases. Their unit tests keep running so the
+//! scaffold stays honest, but `main` does not call them in this version.
+//! Wiring them in will be a localized change here once Phase 1+ starts.
 
-use anyhow::Result;
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 mod cli;
@@ -16,32 +20,10 @@ mod git;
 mod workspace;
 
 fn main() -> ExitCode {
-    // Initialize tracing/logging from RUST_LOG env var
     init_logging();
 
-    match run() {
-        Ok(code) => code,
-        Err(err) => {
-            eprintln!("error: {err}");
-            // Print chain of causes if present
-            let mut source = err.source();
-            while let Some(cause) = source {
-                eprintln!("  caused by: {cause}");
-                source = cause.source();
-            }
-            ExitCode::from(1)
-        }
-    }
-}
-
-fn run() -> Result<ExitCode> {
-    // Detect workspace context from current directory.
-    // This walks up the filesystem looking for .workspace/ marker.
-    let ctx = context::detect()?;
-
-    // Parse arguments with awareness of whether we're in a workspace.
-    // In passthrough mode, we forward verbatim. In workspace mode, we parse normally.
-    cli::dispatch(ctx)
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    commands::passthrough::run(&args)
 }
 
 fn init_logging() {

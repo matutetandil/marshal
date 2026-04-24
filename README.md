@@ -14,7 +14,13 @@ This tool proposes a different path: keep your repositories independent, but giv
 
 ## Status
 
-🚧 **Early development.** Design is solidified (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)), implementation is starting.
+🚧 **Early development.** Design is solidified (see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)) and implementation has started.
+
+The unreleased tree on `main` currently contains a working **pure passthrough** wrapper — the core of the upcoming `0.1.0`. Aliased to `git`, the binary forwards every invocation to the real `git` verbatim: same stdout, same stderr, same exit code, same behavior for interactive commands. No context detection, no command rewriting, no workspace logic — those arrive in later releases (see [`docs/ROADMAP.md`](docs/ROADMAP.md)).
+
+### Portability
+
+Marshal must compile and run wherever Git does: Windows, macOS, and Linux, on both x86_64 and ARM64. The current passthrough implementation is portable by construction — it shells out to `git` via the OS `PATH` and inherits stdio directly, so there are no platform-specific assumptions embedded in the wrapper. CI that enforces this across the full matrix is the next deliverable.
 
 ## Design Principles
 
@@ -56,3 +62,4 @@ MIT — see [`LICENSE`](LICENSE).
 ## Releases
 
 - `0.0.0-reserved` — name reservation on [crates.io](https://crates.io/crates/marshal). No functional code. Tagged as [`v0.0.0-reserved`](https://github.com/matutetandil/marshal/releases/tag/v0.0.0-reserved) on branch `release/0.0.0-reserved`.
+- `0.1.0` — *in progress on `main`.* Pure alias/passthrough. The binary, when aliased to `git`, behaves identically to Git. Logging, release plumbing, and cross-platform CI are the remaining pieces before tagging.

@@ -1,13 +1,14 @@
-// CLI parsing and dispatch.
-//
-// Design: when no workspace context exists, we pass arguments through to git
-// unchanged. When a workspace context exists, we parse with clap and dispatch
-// to workspace-aware handlers.
-//
-// This module is deliberately thin. Actual logic lives in `commands/`.
+//! CLI parsing and dispatch.
+//!
+//! Not consumed by `main` in 0.1.0 (pure passthrough). Kept as scaffolding for
+//! Phase 1+ so the path to wiring command interception is a one-line change in
+//! `main.rs`.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 use crate::context::Context;
@@ -59,21 +60,19 @@ enum Command {
 }
 
 pub fn dispatch(ctx: Option<Context>) -> Result<ExitCode> {
-    let raw_args: Vec<String> = std::env::args().collect();
+    let raw_args: Vec<OsString> = std::env::args_os().collect();
 
-    // If we're not in a workspace, or --raw was passed, go straight to passthrough.
-    // We detect --raw by scanning args; clap parsing happens only when we know
-    // we're operating in workspace mode.
-    if ctx.is_none() || raw_args.iter().any(|a| a == "--raw") {
-        return crate::commands::passthrough::run(&raw_args[1..]);
+    // Outside a workspace, or with --raw, skip clap entirely and forward to git.
+    let raw_requested = raw_args.iter().any(|a| a == "--raw");
+    if ctx.is_none() || raw_requested {
+        let forward: Vec<OsString> = raw_args.iter().skip(1).cloned().collect();
+        return Ok(crate::commands::passthrough::run(&forward));
     }
 
-    // We're in a workspace. Parse with clap.
     let cli = Cli::parse();
 
     match cli.command {
         None => {
-            // No subcommand given. Show help.
             println!("Usage: marshal <command> [options]");
             println!("Run 'marshal --help' for details.");
             Ok(ExitCode::from(0))
@@ -82,6 +81,9 @@ pub fn dispatch(ctx: Option<Context>) -> Result<ExitCode> {
         Some(Command::Init) => crate::commands::init::run(),
         Some(Command::Clone { url }) => crate::commands::clone::run(&url),
         Some(Command::Log) => crate::commands::log::run(ctx.unwrap()),
-        Some(Command::External(args)) => crate::commands::passthrough::run(&args),
+        Some(Command::External(args)) => {
+            let forward: Vec<OsString> = args.into_iter().map(OsString::from).collect();
+            Ok(crate::commands::passthrough::run(&forward))
+        }
     }
 }
