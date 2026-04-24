@@ -1,60 +1,23 @@
 [package]
 name = "marshal"
-version = "0.1.0"
+version = "0.0.0-reserved"
 edition = "2021"
 rust-version = "1.75"
-authors = ["Matías <your-email@example.com>"]
-description = "A Git workspace manager: monorepo ergonomics over multi-repo storage"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/marshal"
+authors = ["Matias Denda <matutetandil@gmail.com>"]
+description = "A Git workspace manager: monorepo ergonomics over multi-repo storage."
+license = "MIT"
+repository = "https://github.com/matutetandil/marshal"
+homepage = "https://github.com/matutetandil/marshal"
 readme = "README.md"
 keywords = ["git", "workspace", "multi-repo", "vcs", "monorepo"]
 categories = ["command-line-utilities", "development-tools"]
+include = [
+    "src/lib.rs",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+]
 
-[[bin]]
+[lib]
 name = "marshal"
-path = "src/main.rs"
-
-[dependencies]
-# CLI
-clap = { version = "4.5", features = ["derive", "env"] }
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
-
-# Error handling
-thiserror = "1.0"
-anyhow = "1.0"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Terminal output
-owo-colors = "4.0"
-indicatif = "0.17"
-
-# Git interaction (shelling out initially; git2 added when needed)
-# git2 = "0.19"
-
-# Parallel execution (add when needed)
-# rayon = "1.10"
-
-# Local storage for oplog (add when needed)
-# rusqlite = { version = "0.31", features = ["bundled"] }
-
-[dev-dependencies]
-tempfile = "3.10"
-assert_cmd = "2.0"
-predicates = "3.1"
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true
-opt-level = 3
-
-[profile.dev]
-opt-level = 0
-debug = true
+path = "src/lib.rs"

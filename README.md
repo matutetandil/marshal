@@ -2,6 +2,8 @@
 
 > Parece monorepo para el dev. Es multi-repo administrado por debajo, con granular scope.
 
+> **Note:** The `0.0.0-reserved` release on crates.io is a name reservation only — it contains no functional code. Real releases begin at `0.1.0`.
+
 A Git workspace manager that gives you the ergonomics of a monorepo while keeping the architectural benefits of independent repositories.
 
 **Marshal** (verb): *to arrange, organize, and coordinate resources or entities into effective formation*. That's what this tool does — it marshals independent Git repositories into a coherent workspace.
@@ -51,4 +53,4 @@ The workspace repo has branches. Each branch declares what state the child repos
 
 ## License
 
-TBD
+MIT — see [`LICENSE`](LICENSE).
