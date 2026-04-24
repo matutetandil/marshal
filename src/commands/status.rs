@@ -1,9 +1,12 @@
-// ws status: show aggregated workspace status.
-//
-// Lists all child repos with their current branch, dirty state, and any
-// divergence from the declared state.
-//
-// This is the fundamental visibility command. It must be fast and clear.
+//! `ws status`: show aggregated workspace status.
+//!
+//! Lists all child repos with their current branch, dirty state, and any
+//! divergence from the declared state. The fundamental visibility command of
+//! the workspace model; it must be fast and clear.
+//!
+//! Scaffolded for Phase 2; not wired from `main` in 0.2.0.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use owo_colors::OwoColorize;

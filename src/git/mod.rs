@@ -27,6 +27,7 @@ pub fn run(cwd: &Path, args: &[&str]) -> Result<Output> {
 }
 
 /// Get the current branch name of a repo, or None if in detached HEAD.
+#[allow(dead_code)] // Consumed by workspace-aware commands starting in Phase 2.
 pub fn current_branch(repo: &Path) -> Result<Option<String>> {
     let out = run(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
     if out.status.success() {
@@ -42,6 +43,7 @@ pub fn current_branch(repo: &Path) -> Result<Option<String>> {
 }
 
 /// Check if a repo has any uncommitted changes in the working tree or index.
+#[allow(dead_code)] // Consumed by workspace-aware commands starting in Phase 2.
 pub fn is_dirty(repo: &Path) -> Result<bool> {
     let out = run(repo, &["status", "--porcelain"])?;
     if !out.status.success() {

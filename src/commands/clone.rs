@@ -1,9 +1,12 @@
-// ws clone: clone a workspace and all its child repos.
-//
-// Takes a URL pointing at a workspace repo. Clones that repo, reads the
-// manifest, and clones all declared child repos in parallel.
-//
-// This is a Phase 2 command. Currently a stub.
+//! `ws clone`: clone a workspace and all its child repos.
+//!
+//! Takes a URL pointing at a workspace repo. Clones that repo, reads the
+//! manifest, and clones all declared child repos in parallel.
+//!
+//! Scaffolded for Phase 2; not wired from `main` in 0.2.0. Stub here keeps
+//! the design surface visible until the real implementation lands.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use std::process::ExitCode;

@@ -1,8 +1,12 @@
-// ws init: initialize a workspace in the current directory.
-//
-// Creates .workspace/ with a minimal manifest.toml and state.toml.
-// Does NOT create the workspace repo as a git repo; that's the user's choice
-// (git init separately, or point at an existing git repo).
+//! `ws init`: initialize a workspace in the current directory.
+//!
+//! Creates `.workspace/` with a minimal `manifest.toml` and `state.toml`.
+//! Does NOT create the workspace repo as a git repo; that's the user's choice
+//! (run `git init` separately, or point at an existing git repo).
+//!
+//! Scaffolded for Phase 2; not wired from `main` in 0.2.0.
+
+#![allow(dead_code)]
 
 use anyhow::{bail, Result};
 use std::process::ExitCode;

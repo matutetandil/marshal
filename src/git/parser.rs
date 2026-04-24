@@ -15,12 +15,6 @@
 //! for flag detection use `OsStr::as_encoded_bytes`, whose leading ASCII bytes
 //! are stable across OS encodings.
 //!
-//! Allow(dead_code) is temporary: the parser is scaffolded here for step 2 of
-//! the 0.2.0 work (wiring cli.rs into main), where it becomes the entry point
-//! for every marshal invocation. Remove the allow when that wiring lands.
-
-#![allow(dead_code)]
-
 use std::ffi::{OsStr, OsString};
 
 /// A structured view over a Git invocation's argv (argv[0] already removed).

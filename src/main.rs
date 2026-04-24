@@ -1,14 +1,15 @@
 //! Marshal entry point.
 //!
-//! 0.1.0 scope: pure passthrough. Every invocation is forwarded to `git`
-//! verbatim, with stdin/stdout/stderr inherited and the exit code propagated
-//! exactly. Workspace logic, context detection, and command interception all
-//! arrive in later releases (see `docs/ROADMAP.md`).
+//! Routing rules:
+//! 1. Parse argv into a `ParsedGitInvocation`.
+//! 2. If the subcommand is literally `marshal` (typical usage:
+//!    `git marshal <sub>` when aliased), dispatch to our own namespace.
+//! 3. Otherwise forward byte-exact to `git`.
 //!
-//! The `cli`, `context`, `workspace`, and most of `commands` modules are
-//! scaffolded for those later releases. Their unit tests keep running so the
-//! scaffold stays honest, but `main` does not call them in this version.
-//! Wiring them in will be a localized change here once Phase 1+ starts.
+//! Passthrough remains the default for every command the user already knows
+//! from Git. The `marshal` namespace is the only place marshal speaks in its
+//! own voice in 0.2.0; later steps add `version` augmentation and
+//! modernization tips layered on top.
 
 use std::ffi::OsString;
 use std::process::ExitCode;
@@ -23,6 +24,23 @@ fn main() -> ExitCode {
     init_logging();
 
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let parsed = git::parser::parse(&args);
+
+    if parsed.subcommand_is("marshal") {
+        return match cli::dispatch(&parsed.subcommand_args) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!("marshal: {err}");
+                let mut source = err.source();
+                while let Some(cause) = source {
+                    eprintln!("  caused by: {cause}");
+                    source = cause.source();
+                }
+                ExitCode::from(1)
+            }
+        };
+    }
+
     commands::passthrough::run(&args)
 }
 

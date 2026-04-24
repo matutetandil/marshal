@@ -147,6 +147,50 @@ fn commit_round_trip_works_through_marshal() {
     );
 }
 
+/// `git marshal` (alias) or `marshal marshal` (direct) lands in marshal's
+/// own namespace and prints an overview. The overview includes the crate
+/// version so users can confirm which marshal is in their PATH.
+#[test]
+fn marshal_namespace_no_subcommand_prints_overview() {
+    let output = marshal()
+        .arg("marshal")
+        .output()
+        .expect("run marshal marshal");
+    assert!(output.status.success(), "exit 0 expected, got {:?}", output.status);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("marshal"),
+        "overview mentions marshal, got: {stdout}"
+    );
+    assert!(
+        stdout.contains(env!("CARGO_PKG_VERSION")),
+        "overview prints crate version, got: {stdout}"
+    );
+}
+
+/// An unknown subcommand inside the marshal namespace exits non-zero with a
+/// clear error — and critically, never reaches `git`. A regression that
+/// forwarded the `marshal` token to git would surface as git's own
+/// "is not a git command" message in stderr; that must not appear.
+#[test]
+fn marshal_namespace_unknown_subcommand_errors_without_reaching_git() {
+    let output = marshal()
+        .args(["marshal", "totally-not-a-real-subcommand"])
+        .output()
+        .expect("run marshal marshal totally-not-...");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown subcommand")
+            && stderr.contains("totally-not-a-real-subcommand"),
+        "stderr names the unknown subcommand, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("is not a git command"),
+        "marshal incorrectly forwarded to git; stderr was: {stderr}"
+    );
+}
+
 /// Arguments with spaces and unicode survive the passthrough. Ensures we never
 /// reinterpret or re-quote argv on the way to git.
 #[test]
