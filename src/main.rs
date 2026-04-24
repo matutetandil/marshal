@@ -16,6 +16,7 @@ use std::process::ExitCode;
 
 mod cli;
 mod commands;
+mod config;
 mod context;
 mod git;
 mod modernize;
@@ -42,17 +43,38 @@ fn main() -> ExitCode {
         };
     }
 
-    // Modernization hook. Registry is empty in step 3 (behavior unchanged);
-    // step 4 fills it with the 12 canonical rules, step 5 adds config to
-    // toggle tips/rewrite. Wiring it now keeps step 4 purely additive.
-    let registry = modernize::Registry::default();
-    if let Some(opinion) = registry.first_opinion(&parsed) {
-        opinion.suggestion.emit_to_stderr();
-        // Rewrite mode comes with config in step 5; step 3 always forwards
-        // the original args.
-    }
+    // Modernization hook gated by config.
+    //
+    // A malformed config file must not break Git commands — the user is
+    // trying to run `git status`, not fix their config. On load error we
+    // warn once to stderr and fall back to defaults so the command still
+    // completes.
+    let effective_config = match config::ConfigResolver::current_user() {
+        Ok(resolver) => resolver.effective().unwrap_or_else(|err| {
+            eprintln!("marshal: warning: using defaults — {err}");
+            config::Config::default()
+        }),
+        Err(err) => {
+            eprintln!("marshal: warning: using defaults — {err}");
+            config::Config::default()
+        }
+    };
 
-    commands::passthrough::run(&args)
+    let registry = modernize::Registry::default();
+    let forward: Vec<OsString> = if let Some(opinion) = registry.first_opinion(&parsed) {
+        if effective_config.modernize_tips() {
+            opinion.suggestion.emit_to_stderr();
+        }
+        if effective_config.modernize_rewrite() {
+            opinion.rewrite.unwrap_or_else(|| args.clone())
+        } else {
+            args.clone()
+        }
+    } else {
+        args.clone()
+    };
+
+    commands::passthrough::run(&forward)
 }
 
 fn init_logging() {

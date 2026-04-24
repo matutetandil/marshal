@@ -1,10 +1,12 @@
-// Command implementations.
-//
-// Each submodule here implements one user-visible command. They share
-// conventions: follow the detect → pre-flight → execute → report cycle,
-// support --explain where applicable, respect the nine invariants.
+//! Command implementations.
+//!
+//! - `passthrough` is the 0.1.0 core: forward argv to git byte-exact.
+//! - `config` is the `marshal config` dispatcher (step 5a+).
+//! - `clone`, `init`, `log`, `status` are Phase 2 scaffolds not wired to `main`
+//!   in 0.2.x; they live here so the design surface remains visible.
 
 pub mod clone;
+pub mod config;
 pub mod init;
 pub mod log;
 pub mod passthrough;
