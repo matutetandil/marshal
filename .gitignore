@@ -1,0 +1,28 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Local workspace state (per-developer, never versioned)
+.workspace/local/
+
+# AI assistant files (Claude, Cursor, Copilot, Aider, Cody, etc.)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md
+.codeium/
+.continue/
+AGENTS.md
+.agent/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
