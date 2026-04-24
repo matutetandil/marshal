@@ -2,16 +2,22 @@
 
 The product is built in phases, each self-contained and releasable. Each phase establishes a foundation for the next.
 
-## Phase 0: Foundation
+## Phase 0: Foundation — ✅ shipped as `0.1.0` (2026-04-24)
 
 **Goal:** scaffold the project, establish architecture, set up tooling.
 
 - [x] Design documents (`ARCHITECTURE.md`, `PRINCIPLES.md`, `GLOSSARY.md`)
 - [x] Cargo project structure
-- [ ] Basic CLI skeleton with `clap`
-- [ ] Alias / passthrough mechanism (invoke with any command, forward to git)
-- [ ] Logging infrastructure
-- [ ] CI pipeline (test, lint, build on major platforms)
+- [x] CLI skeleton with `clap` — scaffolded in `src/cli.rs`; intentionally
+  **not wired** to `main` in `0.1.0` so clap stays out of the passthrough
+  hot path and byte-exact fidelity is preserved. The scaffold is enabled
+  from `main` in `0.2.0` when command interception begins.
+- [x] Alias / passthrough mechanism (invoke with any command, forward to git)
+- [x] Logging infrastructure (`tracing` + `RUST_LOG` filter, stderr writer)
+- [x] CI pipeline — `cargo build --release` and `cargo test` run natively on
+  Linux x86_64, Linux ARM64, macOS ARM64, and Windows x86_64. macOS x86_64
+  is covered by a dedicated cross-build job from the ARM runner. `cargo
+  fmt --check` and `cargo clippy -- -D warnings` run on Linux x86_64.
 
 **Deliverable:** a binary that can be aliased to `git` and forwards every invocation transparently. No workspace awareness yet — context detection is deferred to Phase 2, where it is actually consumed.
 
