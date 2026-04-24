@@ -51,4 +51,8 @@ The workspace repo has branches. Each branch declares what state the child repos
 
 ## License
 
-TBD
+MIT — see [`LICENSE`](LICENSE).
+
+## Releases
+
+- `0.0.0-reserved` — name reservation on [crates.io](https://crates.io/crates/marshal). No functional code. Tagged as [`v0.0.0-reserved`](https://github.com/matutetandil/marshal/releases/tag/v0.0.0-reserved) on branch `release/0.0.0-reserved`.
