@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch/PR to avoid wasted CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # fmt + clippy: single runner (Linux x86_64) because these are
+  # platform-independent lints and running them five times in the test matrix
+  # would just burn CI minutes.
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable, with rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (-D warnings)
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+  # Build + test on every target we commit to supporting. The project's
+  # portability rule is: Marshal runs wherever Git runs — Windows, macOS, Linux
+  # × x86_64, ARM64. Windows on ARM64 is omitted for now because the hosted
+  # runner is still in preview; re-add it once it's GA.
+  test:
+    name: test (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    label: linux-x86_64 }
+          - { os: ubuntu-24.04-arm, label: linux-arm64 }
+          - { os: macos-13,         label: macos-x86_64 }
+          - { os: macos-latest,     label: macos-arm64 }
+          - { os: windows-latest,   label: windows-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-${{ matrix.label }}
+
+      # Build release first. The integration tests exercise the compiled
+      # binary via assert_cmd, so if the release build is broken we want to
+      # know before the test runner spends time on anything else.
+      - name: cargo build --release
+        run: cargo build --release --locked
+
+      - name: cargo test
+        run: cargo test --all-targets --locked

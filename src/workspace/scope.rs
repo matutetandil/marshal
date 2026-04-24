@@ -1,12 +1,16 @@
-// Scope inference.
-//
-// Operations apply to a set of child repos. Which repos? That's the scope.
-// The scope is inferred from context unless explicitly overridden with --on.
-//
-// Each operation has a declared "scope policy" describing how to infer its
-// default scope. This is part of the design, not implementation detail.
-//
-// See ARCHITECTURE.md § "Scope Inference" for the conceptual model.
+//! Scope inference.
+//!
+//! Operations apply to a set of child repos. Which repos? That's the scope.
+//! The scope is inferred from context unless explicitly overridden with --on.
+//!
+//! Each operation has a declared "scope policy" describing how to infer its
+//! default scope. This is part of the design, not implementation detail.
+//!
+//! See ARCHITECTURE.md § "Scope Inference" for the conceptual model.
+//!
+//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0.
+
+#![allow(dead_code)]
 
 use crate::workspace::manifest::Manifest;
 
@@ -112,8 +116,7 @@ pub fn infer(policy: &ScopePolicy, ctx: &InferenceContext) -> Vec<String> {
         return ctx.manifest.repos.iter().map(|r| r.name.clone()).collect();
     }
 
-    let mut candidates: Vec<String> =
-        ctx.manifest.repos.iter().map(|r| r.name.clone()).collect();
+    let mut candidates: Vec<String> = ctx.manifest.repos.iter().map(|r| r.name.clone()).collect();
 
     for dim in &policy.dimensions {
         candidates = apply_dimension(*dim, candidates, ctx);
@@ -122,11 +125,7 @@ pub fn infer(policy: &ScopePolicy, ctx: &InferenceContext) -> Vec<String> {
     candidates
 }
 
-fn apply_dimension(
-    dim: Dimension,
-    candidates: Vec<String>,
-    ctx: &InferenceContext,
-) -> Vec<String> {
+fn apply_dimension(dim: Dimension, candidates: Vec<String>, ctx: &InferenceContext) -> Vec<String> {
     match dim {
         Dimension::Spatial => {
             // If we're inside a specific repo, restrict to just that repo.

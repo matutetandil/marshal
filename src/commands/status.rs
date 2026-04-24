@@ -43,8 +43,8 @@ fn print_human_readable(
     println!("Root:      {}", ctx.root.display());
 
     // Workspace repo branch
-    let workspace_branch = crate::git::current_branch(&ctx.root)?
-        .unwrap_or_else(|| "(detached)".to_string());
+    let workspace_branch =
+        crate::git::current_branch(&ctx.root)?.unwrap_or_else(|| "(detached)".to_string());
     println!("Branch:    {}", workspace_branch.cyan());
     println!();
 
@@ -68,8 +68,8 @@ fn print_human_readable(
             continue;
         }
 
-        let actual_branch = crate::git::current_branch(&repo_path)?
-            .unwrap_or_else(|| "(detached)".to_string());
+        let actual_branch =
+            crate::git::current_branch(&repo_path)?.unwrap_or_else(|| "(detached)".to_string());
         let dirty = crate::git::is_dirty(&repo_path)?;
 
         let declared = state.get(&repo_entry.name);
@@ -86,7 +86,9 @@ fn print_human_readable(
         };
 
         let divergence = if actual_branch != expected_branch {
-            format!("  (declared: {})", expected_branch).dimmed().to_string()
+            format!("  (declared: {})", expected_branch)
+                .dimmed()
+                .to_string()
         } else {
             String::new()
         };
@@ -109,7 +111,10 @@ fn print_human_readable(
 fn explain_mode(ctx: &Context, manifest: &Manifest) -> Result<ExitCode> {
     println!("Scope inference for 'status':");
     println!("  Policy: full workspace (no dimensions applied)");
-    println!("  Current directory: {}", std::env::current_dir()?.display());
+    println!(
+        "  Current directory: {}",
+        std::env::current_dir()?.display()
+    );
     println!("  Current repo context: {:?}", ctx.current_repo);
     println!("  Workspace root: {}", ctx.root.display());
     println!("  Repos in manifest: {}", manifest.repos.len());

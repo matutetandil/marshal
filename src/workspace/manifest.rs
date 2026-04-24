@@ -1,11 +1,15 @@
-// Manifest parsing and validation.
-//
-// The manifest describes the structural definition of a workspace: which repos
-// compose it, their URLs, and their affinities. It lives at
-// `.workspace/manifest.toml` and is versioned in the workspace repo.
-//
-// Changes to the manifest should be rare and deliberate, going through normal
-// Git review workflows.
+//! Manifest parsing and validation.
+//!
+//! The manifest describes the structural definition of a workspace: which repos
+//! compose it, their URLs, and their affinities. It lives at
+//! `.workspace/manifest.toml` and is versioned in the workspace repo.
+//!
+//! Changes to the manifest should be rare and deliberate, going through normal
+//! Git review workflows.
+//!
+//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0.
+
+#![allow(dead_code)]
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -97,18 +101,11 @@ impl Manifest {
         // Validate affinity references
         for (repo_name, affinity) in &self.affinities {
             if !names.contains(repo_name) {
-                anyhow::bail!(
-                    "affinity declared for unknown repo '{}'",
-                    repo_name
-                );
+                anyhow::bail!("affinity declared for unknown repo '{}'", repo_name);
             }
             for dep in &affinity.depends_on {
                 if !names.contains(dep) {
-                    anyhow::bail!(
-                        "repo '{}' depends on unknown repo '{}'",
-                        repo_name,
-                        dep
-                    );
+                    anyhow::bail!("repo '{}' depends on unknown repo '{}'", repo_name, dep);
                 }
             }
         }

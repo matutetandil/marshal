@@ -44,7 +44,10 @@ default_branch = "main"
     std::fs::write(marker.join(MANIFEST_FILE), manifest_content)?;
 
     // Empty state declaration
-    std::fs::write(marker.join(STATE_FILE), "# Declared state for current branch\n")?;
+    std::fs::write(
+        marker.join(STATE_FILE),
+        "# Declared state for current branch\n",
+    )?;
 
     // Create .gitignore in .workspace/ to ignore local/
     std::fs::write(marker.join(".gitignore"), "local/\n")?;

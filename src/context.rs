@@ -1,10 +1,15 @@
-// Workspace context detection.
-//
-// On every invocation, we walk up the filesystem from the current directory
-// looking for a `.workspace/` marker directory. If found, we've identified
-// a workspace root and can determine which child repo (if any) we're inside.
-//
-// This mirrors how git finds the `.git/` directory of the current repo.
+//! Workspace context detection.
+//!
+//! On every invocation, we walk up the filesystem from the current directory
+//! looking for a `.workspace/` marker directory. If found, we've identified
+//! a workspace root and can determine which child repo (if any) we're inside.
+//!
+//! This mirrors how git finds the `.git/` directory of the current repo.
+//!
+//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0 (pure passthrough).
+//! The unit tests below keep the module honest.
+
+#![allow(dead_code)]
 
 use anyhow::{Context as _, Result};
 use std::path::{Path, PathBuf};

@@ -91,7 +91,10 @@ fn nonzero_exit_codes_propagate() {
         .output()
         .expect("run marshal status outside a repo");
 
-    assert!(!direct.status.success(), "precondition: git status outside a repo should fail");
+    assert!(
+        !direct.status.success(),
+        "precondition: git status outside a repo should fail"
+    );
     assert_eq!(direct.status.code(), wrapped.status.code());
 }
 

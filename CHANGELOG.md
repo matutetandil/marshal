@@ -43,6 +43,17 @@ Phase 0 implementation underway — target release `0.1.0`. See
   wherever Git runs (Windows, macOS, Linux; x86_64 and ARM64). The passthrough
   implementation honours this by relying only on `std::process::Command`,
   `std::ffi::OsString`, and inherited stdio — no platform-specific assumptions.
+- **Cross-platform CI pipeline** (`.github/workflows/ci.yml`). Every push to
+  `main` and every PR runs `cargo build --release` and `cargo test` on five
+  runners: Linux x86_64, Linux ARM64, macOS x86_64, macOS ARM64, Windows
+  x86_64. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`
+  run once on Linux x86_64. `--locked` is used everywhere so `Cargo.lock` is
+  the contract. Windows ARM64 is deferred until the hosted runner leaves
+  preview.
+- `#![allow(dead_code)]` applied to Phase 2+ scaffolded modules
+  (`context.rs`, `workspace/*.rs`) so the CI can enforce `clippy -D warnings`
+  against the live 0.1.0 code without false positives from scaffolded code
+  that will be consumed in later releases.
 
 ## [0.0.0-reserved] — 2026-04-24
 

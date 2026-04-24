@@ -5,8 +5,8 @@
 // and git interaction concerns.
 
 pub mod manifest;
-pub mod state;
 pub mod scope;
+pub mod state;
 
 pub use manifest::Manifest;
 pub use state::StateDeclaration;

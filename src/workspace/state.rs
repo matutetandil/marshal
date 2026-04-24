@@ -1,11 +1,15 @@
-// State declaration parsing.
-//
-// state.toml declares the expected state of each child repo for the currently
-// active branch of the workspace repo. Different workspace branches have
-// different state.toml contents, versioned normally with Git.
-//
-// The state declaration is intent. It does not force reality; divergence
-// between declared and actual state is normal and handled elsewhere.
+//! State declaration parsing.
+//!
+//! state.toml declares the expected state of each child repo for the currently
+//! active branch of the workspace repo. Different workspace branches have
+//! different state.toml contents, versioned normally with Git.
+//!
+//! The state declaration is intent. It does not force reality; divergence
+//! between declared and actual state is normal and handled elsewhere.
+//!
+//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0.
+
+#![allow(dead_code)]
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
