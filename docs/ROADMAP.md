@@ -21,17 +21,29 @@ The product is built in phases, each self-contained and releasable. Each phase e
 
 **Deliverable:** a binary that can be aliased to `git` and forwards every invocation transparently. No workspace awareness yet — context detection is deferred to Phase 2, where it is actually consumed.
 
-## Phase 1: Wrapper — UX Improvements over Git
+## Phase 1: Wrapper — UX Improvements over Git — 🟡 first slice shipped as `0.2.0` (2026-04-24)
 
 **Goal:** useful wrapper for plain Git repos. Pure value-add, no workspace logic required.
 
-- [ ] Command interception with pass-through default
-- [ ] Command modernization suggestions (e.g. `checkout -b` → tip about `switch -c`, `branch -d` → tip about `branch --delete`)
-- [ ] Improved status output (better colors, structure)
+- [x] Command interception with pass-through default *(0.2.0)*
+- [x] Command modernization suggestions — 11 rules covering the 12 canonical
+  legacy forms: `checkout → switch/restore` (Git 2.23 split, 8 patterns),
+  `reset → restore --staged` (file-mode), `stash save → stash push`,
+  `remote rm → remote remove`. Tips to stderr by default; opt-in rewrite
+  via `modernize.rewrite`. *(0.2.0)*
+- [x] Configuration system — three-tier (`system < global < local`) with
+  TOML-on-disk, `marshal config get|set|unset|list`, `--show-origin`, and
+  `--system|--global|--local` flags. Per-repo local lives at
+  `<git-dir>/marshal/config.toml`. *(0.2.0)*
+- [x] `--version` augmentation — marshal appends its own version line after
+  git's, following the node+npm / php+xdebug pattern. *(0.2.0)*
+- [ ] Improved status output (better colors, structure) — deferred: the
+  `PRINCIPLES.md` rule "don't improve Git in passthrough" limits what we
+  can do before workspace context arrives (Phase 2). Revisit once workspace
+  mode provides a natural scope for the augmentation.
 - [ ] Actionable error messages for common Git errors (top 20)
 - [ ] `help` command with context-awareness
 - [ ] `what-now` command that analyzes current state and suggests next actions
-- [ ] Configuration system (user preferences, project settings)
 - [ ] Output modes: human (colors, interactive) and machine (JSON, scripting)
 
 ### Modernization Policy
