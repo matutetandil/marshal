@@ -23,7 +23,7 @@ jobs:
     name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain (stable, with rustfmt + clippy)
         uses: dtolnay/rust-toolchain@stable
@@ -40,10 +40,18 @@ jobs:
       - name: cargo clippy (-D warnings)
         run: cargo clippy --all-targets --locked -- -D warnings
 
-  # Build + test on every target we commit to supporting. The project's
-  # portability rule is: Marshal runs wherever Git runs — Windows, macOS, Linux
-  # × x86_64, ARM64. Windows on ARM64 is omitted for now because the hosted
-  # runner is still in preview; re-add it once it's GA.
+  # Build + test on every target that (a) has reliable GitHub-hosted runners
+  # today and (b) the project commits to supporting. The portability rule is:
+  # Marshal runs wherever Git runs — Windows, macOS, Linux × x86_64, ARM64.
+  #
+  # macOS x86_64 is covered via the cross-build job below instead of a native
+  # runner: the `macos-13` Intel pool is being wound down and queue times are
+  # unreliable. Cross-compiling from the ARM runner verifies the toolchain
+  # produces a valid x86_64 Mach-O binary, which is the failure mode we care
+  # about for std-only Rust code. Tests still run natively on macOS ARM64.
+  #
+  # Windows on ARM64 is omitted entirely for now because the hosted runner is
+  # still in preview; re-add it once it's GA.
   test:
     name: test (${{ matrix.label }})
     strategy:
@@ -52,12 +60,11 @@ jobs:
         include:
           - { os: ubuntu-latest,    label: linux-x86_64 }
           - { os: ubuntu-24.04-arm, label: linux-arm64 }
-          - { os: macos-13,         label: macos-x86_64 }
           - { os: macos-latest,     label: macos-arm64 }
           - { os: windows-latest,   label: windows-x86_64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -74,3 +81,32 @@ jobs:
 
       - name: cargo test
         run: cargo test --all-targets --locked
+
+  # Cross-compile check for targets whose native GitHub runners are unreliable
+  # or unavailable. We don't run tests here — the point is to confirm the
+  # toolchain + dependencies can produce a valid binary for the target. Tests
+  # for the same target family run natively elsewhere in the matrix above
+  # (e.g., macOS ARM64 covers the runtime behavior on Apple Silicon; this job
+  # covers the Intel artefact).
+  cross-build:
+    name: cross-build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: x86_64-apple-darwin, label: macos-x86_64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain (stable) with target ${{ matrix.target }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-${{ matrix.label }}
+
+      - name: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}

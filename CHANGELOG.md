@@ -44,12 +44,16 @@ Phase 0 implementation underway — target release `0.1.0`. See
   implementation honours this by relying only on `std::process::Command`,
   `std::ffi::OsString`, and inherited stdio — no platform-specific assumptions.
 - **Cross-platform CI pipeline** (`.github/workflows/ci.yml`). Every push to
-  `main` and every PR runs `cargo build --release` and `cargo test` on five
-  runners: Linux x86_64, Linux ARM64, macOS x86_64, macOS ARM64, Windows
-  x86_64. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`
-  run once on Linux x86_64. `--locked` is used everywhere so `Cargo.lock` is
-  the contract. Windows ARM64 is deferred until the hosted runner leaves
-  preview.
+  `main` and every PR runs `cargo build --release` and `cargo test` natively
+  on four runners: Linux x86_64, Linux ARM64, macOS ARM64, Windows x86_64.
+  macOS x86_64 is covered by a dedicated `cross-build` job that produces the
+  Intel binary from the macOS ARM64 runner — the hosted `macos-13` pool is
+  being wound down and queue times are unreliable; cross-compiling verifies
+  the toolchain still produces a valid `x86_64-apple-darwin` artifact, which
+  is the failure mode we care about for `std`-only Rust code. `cargo fmt
+  --check` and `cargo clippy --all-targets -- -D warnings` run once on Linux
+  x86_64. `--locked` is used everywhere so `Cargo.lock` is the contract.
+  Windows ARM64 is deferred until the hosted runner leaves preview.
 - `#![allow(dead_code)]` applied to Phase 2+ scaffolded modules
   (`context.rs`, `workspace/*.rs`) so the CI can enforce `clippy -D warnings`
   against the live 0.1.0 code without false positives from scaffolded code
