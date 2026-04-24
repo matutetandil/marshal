@@ -25,10 +25,32 @@ fn marshal() -> Command {
 fn marshal_with_isolated_config(config_path: &std::path::Path) -> Command {
     let mut cmd = marshal();
     cmd.env("MARSHAL_CONFIG", config_path)
-        // Prevent fallback to the real user's XDG/HOME if MARSHAL_CONFIG
-        // is mis-handled — test must fail if isolation breaks.
+        // Point system config somewhere unreachable by default so tests that
+        // don't care about it never accidentally read /etc/marshal. Tests
+        // that DO care call `marshal_with_both_config_isolations`.
+        .env(
+            "MARSHAL_SYSTEM_CONFIG",
+            config_path.with_extension("system"),
+        )
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("APPDATA");
+        .env_remove("APPDATA")
+        .env_remove("ProgramData");
+    cmd
+}
+
+/// Same as [`marshal_with_isolated_config`] but also points
+/// `MARSHAL_SYSTEM_CONFIG` at a caller-specified path. For tests that need to
+/// exercise the system layer explicitly.
+fn marshal_with_both_isolations(
+    global_path: &std::path::Path,
+    system_path: &std::path::Path,
+) -> Command {
+    let mut cmd = marshal();
+    cmd.env("MARSHAL_CONFIG", global_path)
+        .env("MARSHAL_SYSTEM_CONFIG", system_path)
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("APPDATA")
+        .env_remove("ProgramData");
     cmd
 }
 
@@ -489,6 +511,162 @@ fn modernize_rewrite_actually_rewrites_legacy_form() {
         String::from_utf8_lossy(&branch_out.stdout).trim(),
         "feat/rewritten",
         "HEAD moved to the new branch"
+    );
+}
+
+/// `--system` writes the system layer, and the effective value reflects it
+/// when no global override is present.
+#[test]
+fn config_set_system_writes_system_layer() {
+    let dir = TempDir::new().unwrap();
+    let global_path = dir.path().join("user.toml");
+    let system_path = dir.path().join("sys.toml");
+
+    marshal_with_both_isolations(&global_path, &system_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--system",
+            "modernize.tips",
+            "false",
+        ])
+        .assert()
+        .success();
+
+    // The system file exists with the value we set.
+    let on_disk = std::fs::read_to_string(&system_path).unwrap();
+    assert!(on_disk.contains("tips = false"));
+
+    // `get` reflects the system value because no global override is set.
+    let got = marshal_with_both_isolations(&global_path, &system_path)
+        .args(["marshal", "config", "get", "modernize.tips"])
+        .output()
+        .unwrap();
+    assert!(got.status.success());
+    assert_eq!(String::from_utf8_lossy(&got.stdout).trim(), "false");
+}
+
+/// Precedence: global overrides system when both set the same key.
+#[test]
+fn global_layer_overrides_system_layer() {
+    let dir = TempDir::new().unwrap();
+    let global_path = dir.path().join("user.toml");
+    let system_path = dir.path().join("sys.toml");
+
+    // Admin disables tips system-wide.
+    marshal_with_both_isolations(&global_path, &system_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--system",
+            "modernize.tips",
+            "false",
+        ])
+        .assert()
+        .success();
+    // User re-enables tips for themselves.
+    marshal_with_both_isolations(&global_path, &system_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--global",
+            "modernize.tips",
+            "true",
+        ])
+        .assert()
+        .success();
+
+    let got = marshal_with_both_isolations(&global_path, &system_path)
+        .args(["marshal", "config", "get", "modernize.tips"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&got.stdout).trim(),
+        "true",
+        "global must override system when both are set"
+    );
+}
+
+/// System value is visible when global is explicitly `unset` (i.e., global
+/// file has no value for this key).
+#[test]
+fn system_value_surfaces_when_global_is_unset() {
+    let dir = TempDir::new().unwrap();
+    let global_path = dir.path().join("user.toml");
+    let system_path = dir.path().join("sys.toml");
+
+    marshal_with_both_isolations(&global_path, &system_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--system",
+            "modernize.rewrite",
+            "true",
+        ])
+        .assert()
+        .success();
+    // Set then unset on global to confirm unset actually falls through to
+    // system, not to the compiled-in default.
+    marshal_with_both_isolations(&global_path, &system_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--global",
+            "modernize.rewrite",
+            "false",
+        ])
+        .assert()
+        .success();
+    marshal_with_both_isolations(&global_path, &system_path)
+        .args([
+            "marshal",
+            "config",
+            "unset",
+            "--global",
+            "modernize.rewrite",
+        ])
+        .assert()
+        .success();
+
+    let got = marshal_with_both_isolations(&global_path, &system_path)
+        .args(["marshal", "config", "get", "modernize.rewrite"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&got.stdout).trim(),
+        "true",
+        "unsetting global falls through to system, not to compiled default"
+    );
+}
+
+/// `--local` is reserved for step 5c and must fail cleanly until then.
+#[test]
+fn local_flag_is_rejected_until_step_5c() {
+    let dir = TempDir::new().unwrap();
+    let global_path = dir.path().join("user.toml");
+    let system_path = dir.path().join("sys.toml");
+
+    let output = marshal_with_both_isolations(&global_path, &system_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "--local",
+            "modernize.tips",
+            "false",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "--local must reject for now");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--local is not available yet"),
+        "stderr explains --local is deferred, got: {stderr}"
     );
 }
 

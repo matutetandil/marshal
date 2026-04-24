@@ -14,9 +14,9 @@ use std::path::Path;
 /// `System < Global < Local`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
-    /// Machine-wide layer. `#[allow(dead_code)]` until step 5b wires it up.
-    #[allow(dead_code)]
+    /// Machine-wide layer.
     System,
+    /// Per-user layer.
     Global,
     /// Per-repository layer. `#[allow(dead_code)]` until step 5c wires it up.
     #[allow(dead_code)]

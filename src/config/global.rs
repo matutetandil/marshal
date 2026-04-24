@@ -178,6 +178,7 @@ mod tests {
     #[cfg(not(windows))]
     mod default_path {
         use super::*;
+        use crate::config::test_support::ENV_MUTEX;
 
         /// Save + restore env vars across tests to avoid cross-test pollution.
         struct EnvGuard {
@@ -207,6 +208,7 @@ mod tests {
 
         #[test]
         fn env_override_wins_over_xdg_and_home() {
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let _guard = EnvGuard::new(&["MARSHAL_CONFIG", "XDG_CONFIG_HOME", "HOME"]);
             std::env::set_var("MARSHAL_CONFIG", "/tmp/override.toml");
             std::env::set_var("XDG_CONFIG_HOME", "/should/not/be/used");
@@ -218,6 +220,7 @@ mod tests {
 
         #[test]
         fn xdg_config_home_is_used_when_set() {
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let _guard = EnvGuard::new(&["MARSHAL_CONFIG", "XDG_CONFIG_HOME", "HOME"]);
             std::env::remove_var("MARSHAL_CONFIG");
             std::env::set_var("XDG_CONFIG_HOME", "/tmp/xdg");
@@ -229,6 +232,7 @@ mod tests {
 
         #[test]
         fn falls_back_to_home_dot_config() {
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let _guard = EnvGuard::new(&["MARSHAL_CONFIG", "XDG_CONFIG_HOME", "HOME"]);
             std::env::remove_var("MARSHAL_CONFIG");
             std::env::remove_var("XDG_CONFIG_HOME");

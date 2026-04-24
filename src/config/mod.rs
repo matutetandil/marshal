@@ -21,8 +21,20 @@
 
 pub mod global;
 pub mod source;
+pub mod system;
 
 pub use source::{ConfigSource, Level};
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::Mutex;
+
+    /// Tests that mutate process env vars (`HOME`, `XDG_CONFIG_HOME`,
+    /// `MARSHAL_CONFIG`, `MARSHAL_SYSTEM_CONFIG`, etc.) must hold this lock
+    /// to prevent parallel tests from racing on shared state. Poisoning is
+    /// ignored — a panicking test should not take down the rest.
+    pub static ENV_MUTEX: Mutex<()> = Mutex::new(());
+}
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -162,10 +174,22 @@ impl ConfigResolver {
         self.sources.push(source);
     }
 
-    /// Default resolver for end-user operation. Step 5a: only the global
-    /// layer is registered.
+    /// Default resolver for end-user operation.
+    ///
+    /// Layers are registered in low→high precedence order (system below
+    /// global), so `global` overrides `system` during the merge. Step 5c
+    /// adds `local` on top of global.
+    ///
+    /// System-layer construction is best-effort: if the platform can't tell
+    /// us where system config lives (e.g. missing `ProgramData` on Windows),
+    /// we log a warning and skip that layer rather than aborting — the user
+    /// is trying to run `git status`, not configure their box.
     pub fn current_user() -> Result<Self> {
         let mut r = Self::new();
+        match system::SystemConfigSource::new() {
+            Ok(s) => r.register(Box::new(s)),
+            Err(err) => tracing::warn!(%err, "skipping system config layer"),
+        }
         r.register(Box::new(global::GlobalConfigSource::new()?));
         Ok(r)
     }
