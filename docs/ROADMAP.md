@@ -114,7 +114,14 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   state.toml's declared branch, and renders with the universal
   hide-boring pattern. `--all` expands; JSON form returns the full
   per-repo payload.
-- [ ] Workspace log: aggregated or per-repo depending on context
+- [x] Workspace log: aggregated cross-repo activity. `git ws log`
+  walks every declared repo, fetches per-line tab-separated entries
+  via `git -C <path> log --pretty=…`, sorts by descending ISO author
+  date, and renders the top-N as a unified timeline. `-n <N>`
+  customises the cap (default 20); the global `--all` flag lifts
+  it. Per-repo log via `cd src/<repo> && git log` (passthrough);
+  the "context-aware" half (inside a child, behave like git log of
+  that repo) waits for the scope inference engine.
 - [ ] Workspace diff: diff of workspace repo, semantic interpretation of state.toml changes
 - [ ] Scope inference engine
 - [ ] `--explain` flag implementation

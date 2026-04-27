@@ -14,6 +14,32 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **`ws log`.** Second aggregated read-only command. Walks every
+  declared child repo, runs `git -C <path> log --pretty=… -n N`,
+  parses tab-separated entries (hash, ISO author date, author,
+  subject), combines and sorts by date descending, and renders
+  the top N as a unified timeline. The "monorepo feel" of the
+  thesis applied to log: one timeline across all repos.
+  - `-n <N>` / `--limit <N>` (also `-n20` shorthand and
+    `--limit=N` equals form) caps the result. Default: 20.
+  - `--all` (the global flag) lifts the cap and skips the
+    truncation footer.
+  - Stable ordering: descending date primary, repo name then
+    hash as tie-breakers. Two same-minute commits always render
+    in the same order between invocations.
+  - Empty repos (`does not have any commits yet`) and repos
+    missing on disk are silently skipped — `ws status` already
+    surfaces missing repos; no need for log to repeat the noise.
+  - JSON form: full `{workspace, entries[], sampled,
+    limit_applied?}`. `sampled` reflects the entries collected
+    before global truncation (useful when you want to know
+    whether the cap kicked in).
+  - No spatial inference yet: `ws log` always returns the
+    workspace-wide view, regardless of where the user invokes
+    it. Per-repo log via `cd src/<repo> && git log` (passthrough).
+    Scope inference (e.g. `ws log` inside a child becomes
+    per-repo log) lands in a future Phase 2 slice.
+
 - **`ws status`.** First aggregated read-only command across child
   repos. For each repo declared in the manifest, resolves the
   on-disk path, fetches its per-repo state via the shared
