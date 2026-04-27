@@ -4,12 +4,14 @@
 //! "another repository-state hint" lands next to its siblings. Each
 //! file contains one or more rules and their unit tests.
 //!
-//! Current coverage (9 of the planned ~20 hints):
+//! Current coverage (11 of the planned ~20 hints):
 //!
 //! * **repository.rs** — `not a git repository`.
 //! * **ownership.rs** — `detected dubious ownership`.
 //! * **ssh.rs** — `Permission denied (publickey)`.
-//! * **push.rs** — non-fast-forward push rejection.
+//! * **push.rs** — three push-lifecycle hints: non-fast-forward
+//!   rejection, missing upstream on first push, src refspec
+//!   doesn't match anything local.
 //! * **working_tree.rs** — `local changes would be overwritten`.
 //! * **merge.rs** — `refusing to merge unrelated histories`.
 //! * **pathspec.rs** — `pathspec '…' did not match any file`.
@@ -38,6 +40,8 @@ pub fn register_defaults(registry: &mut Registry) {
     registry.register(Box::new(ownership::DubiousOwnership));
     registry.register(Box::new(ssh::PublicKeyDenied));
     registry.register(Box::new(push::PushNonFastForward));
+    registry.register(Box::new(push::UpstreamNotConfigured));
+    registry.register(Box::new(push::SrcRefspecNoMatch));
     registry.register(Box::new(working_tree::LocalChangesWouldBeOverwritten));
     registry.register(Box::new(merge::UnrelatedHistories));
     registry.register(Box::new(pathspec::PathspecNoMatch));
