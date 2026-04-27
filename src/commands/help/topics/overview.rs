@@ -31,6 +31,7 @@ pub(crate) fn produce_with_ctx(ctx: &HelpContext) -> HelpOutput {
 
     let context_intro = context_intro(ctx);
     let subcommands = subcommands_section();
+    let workspace_ns = workspace_namespace_section();
     let config_keys = config_keys_section();
     let topics = topics_section();
     let global_flags = global_flags_section();
@@ -42,6 +43,7 @@ pub(crate) fn produce_with_ctx(ctx: &HelpContext) -> HelpOutput {
         sections: vec![
             context_intro,
             subcommands,
+            workspace_ns,
             config_keys,
             topics,
             global_flags,
@@ -74,11 +76,21 @@ fn context_intro(ctx: &HelpContext) -> HelpSection {
 
 fn subcommands_section() -> HelpSection {
     HelpSection {
-        heading: "Subcommands:".to_string(),
+        heading: "Subcommands (under the `marshal` namespace):".to_string(),
         body: vec![
             "config     Manage Marshal configuration (get/set/unset/list).".to_string(),
             "what-now   Analyse repo state and suggest the next action.".to_string(),
             "help       Print this overview, or `help <topic>` for details.".to_string(),
+        ],
+    }
+}
+
+fn workspace_namespace_section() -> HelpSection {
+    HelpSection {
+        heading: "Workspace operations (sibling namespace, opt-in):".to_string(),
+        body: vec![
+            "git ws     Show the current workspace context.".to_string(),
+            "           More commands (init/status/log/diff/clone) ship in Phase 2.".to_string(),
         ],
     }
 }
@@ -141,7 +153,18 @@ mod tests {
         assert!(out
             .sections
             .iter()
-            .any(|s| s.heading.starts_with("Subcommands:")));
+            .any(|s| s.heading.starts_with("Subcommands")));
+    }
+
+    #[test]
+    fn overview_carries_a_workspace_namespace_section() {
+        let out = produce_with_ctx(&ctx(true));
+        let workspace = out
+            .sections
+            .iter()
+            .find(|s| s.heading.contains("Workspace operations"))
+            .expect("workspace namespace section present");
+        assert!(workspace.body.iter().any(|l| l.contains("git ws")));
     }
 
     #[test]

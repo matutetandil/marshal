@@ -1075,7 +1075,7 @@ fn help_with_no_arg_shows_overview() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Marshal"));
-    assert!(stdout.contains("Subcommands:"));
+    assert!(stdout.contains("Subcommands"));
     assert!(stdout.contains("config"));
     assert!(stdout.contains("what-now"));
 }
@@ -1089,7 +1089,7 @@ fn help_with_named_topic_resolves_it() {
         .expect("run marshal help overview");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Subcommands:"));
+    assert!(stdout.contains("Subcommands"));
 }
 
 /// Unknown topic exits non-zero and lists available topics.

@@ -78,11 +78,16 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
 
 **Deliverable:** a tool that enhances plain Git usage without any workspace features. Adoptable by users who have no intention of using workspaces.
 
-## Phase 2: Workspace Core — Read-Only Operations
+## Phase 2: Workspace Core — Read-Only Operations — 🟡 first slice shipped
 
 **Goal:** workspace detection and passive operations. No state modification yet.
 
-- [ ] Context detection (walk filesystem upward, find `.workspace/`)
+- [x] Context detection (walk filesystem upward, find `.workspace/`).
+  Lives in `src/context.rs`; consumed by the new `ws` namespace.
+  `Context { root, current_repo }` — `current_repo` identified by
+  the `<root>/src/<name>/…` convention (will be reconciled against
+  the manifest in the manifest-parsing slice). Reachable via
+  `git ws` (the bare command in the new `ws` sibling namespace).
 - [ ] Workspace initialization: `ws init` (creates `.workspace/` structure)
 - [ ] Manifest parsing and validation
 - [ ] State.toml parsing and validation

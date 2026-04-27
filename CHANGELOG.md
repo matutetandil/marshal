@@ -6,11 +6,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Phase 1 closed with `0.3.0`. Next milestone is Phase 2 / `0.4.0` —
-read-only workspace operations: context detection (walk the
-filesystem looking for `.workspace/`), `ws init`, manifest +
-state.toml parsing, `ws status`, `ws log`, `ws diff`, scope
-inference, the `--explain` flag. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Work in progress on `0.4.0` — Phase 2 (read-only workspace
+operations). First slice shipped: the `ws` namespace exists and
+context detection is live. Next: manifest + state.toml parsing,
+`ws init`, `ws status`, `ws log`, `ws diff`, scope inference,
+the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- **`ws` namespace.** Sibling to the `marshal` namespace; with
+  marshal aliased to git, the user invokes workspace operations
+  as `git ws <…>`. The choice of a separate top-level namespace
+  (rather than nesting under `marshal` or intercepting plain
+  `git` commands) is dictated by Invariant 9 (Developer Flow
+  Preserved): workspace features are additive, opt-in, behind a
+  recognisable prefix. A user who never types `ws` keeps git's
+  exact behaviour.
+- **Context detection.** `src/context.rs` is no longer
+  `#![allow(dead_code)]`. `context::detect()` walks up the
+  filesystem from cwd looking for a `.workspace/` marker — same
+  pattern git uses for `.git/`. Returns the workspace root and
+  identifies the current child repo by `<root>/src/<name>/…`
+  convention (the manifest will refine this in Slice B).
+- **`git ws` (no arg) — first ws subcommand.** Prints the
+  current workspace context as `Workspace at: <root>` plus
+  `Current repo: <name>` (or `(workspace root)`). Outside any
+  workspace it errors cleanly with a helpful message and exits
+  non-zero. JSON form: `{root, current_repo?}` — `current_repo`
+  is skipped when at the workspace root.
+- **`cli::dispatch_ws`** sibling of `dispatch_marshal`. Both
+  extract `--json` and thread the format. The `main.rs`
+  top-level routing gains a `ws` arm; a new `run_namespace`
+  helper centralises the anyhow → ExitCode translation shared
+  by both namespaces.
+
+### Changed
+
+- `cli::dispatch` is renamed to `cli::dispatch_marshal` to make
+  room for `cli::dispatch_ws`.
+- The marshal-namespace overview output (`git marshal` no arg)
+  now advertises the `ws` namespace so users discover it without
+  reading docs.
+- `marshal help` overview topic now mentions the `ws` namespace
+  alongside the marshal subcommands.
 
 ## [0.3.0] — 2026-04-27
 
