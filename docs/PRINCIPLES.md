@@ -22,7 +22,7 @@ This applies to:
 
 If something we're designing has no natural Git analogue, suspect it's wrong.
 
-## The Nine Invariants
+## The Ten Invariants
 
 Every feature, command, and behavior must satisfy these. A proposed feature that violates any invariant is rejected or redesigned.
 
@@ -61,6 +61,12 @@ The default behavior is always the most conservative option. Actions that modify
 ### 9. Developer Flow Is Preserved
 
 The individual developer's daily Git flow does not change. Workspace capabilities are additive and optional. A developer can work productively without ever invoking a workspace-specific command. Workspace features exist for those who need them, not as a mandatory ritual.
+
+### 10. Open/Closed via Strategy
+
+Every feature family — modernization rules, error hints, advice rules, marshal subcommands, future workspace operations — is implemented as a Strategy + Registry. Adding a new member is a new trait impl plus one registration line, never a modification of existing impls or the dispatcher. SOLID is the codebase-wide design discipline; Strategy is the default extension mechanism for any family expected to grow.
+
+This invariant governs implementation, not user-visible behavior. It is bundled with the others because it is what keeps the project reviewable and extensible as the surface grows. A patch that adds a feature by editing the body of an existing impl, or by branching inside a dispatcher on a new case, is rejected the same way a feature that violates Reversibility (Invariant 2) is rejected.
 
 ## Applying This Document
 
