@@ -107,7 +107,13 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   Global `--all` flag (mirrors `--json` shape) overrides the
   abbreviation. Threshold for unconditional expansion: 5 repos.
 - [ ] Workspace clone: `ws clone <url>` (clones workspace + all child repos in parallel)
-- [ ] Workspace status: aggregated view of all repos, divergence reporting
+- [x] Workspace status: aggregated view of all repos, divergence reporting.
+  `git ws status` walks every declared repo via `RepoState::detect_at(path)`
+  (extracted to `crate::git::porcelain` from `marshal what-now`'s state
+  extractor), reconciles the on-disk state against the manifest +
+  state.toml's declared branch, and renders with the universal
+  hide-boring pattern. `--all` expands; JSON form returns the full
+  per-repo payload.
 - [ ] Workspace log: aggregated or per-repo depending on context
 - [ ] Workspace diff: diff of workspace repo, semantic interpretation of state.toml changes
 - [ ] Scope inference engine

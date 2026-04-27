@@ -14,6 +14,42 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **`ws status`.** First aggregated read-only command across child
+  repos. For each repo declared in the manifest, resolves the
+  on-disk path, fetches its per-repo state via the shared
+  `git::porcelain::RepoState::detect_at`, and reconciles against
+  the workspace's declared intent (state.toml override, or manifest
+  default). Output (`WsStatusOutput`) carries the workspace info
+  plus a `RepoStatus` per declared repo with `clean_on_declared`,
+  `missing_from_disk`, and the full `RepoState` snapshot.
+  - Hide-boring rendering: clean repos collapse to a count
+    ("5 other repos clean and on declared branch. Run with `--all`
+    to list them."); only "interesting" repos (dirty, off-branch,
+    ahead/behind, in-progress, missing, detached, initial) are
+    listed individually with a one-line detail.
+  - All-clean fast path: "All N repos clean and on declared branch."
+    when nothing is interesting and N is large enough to abbreviate.
+  - `--all` expands every repo with full detail; small N (≤ 5)
+    expands by default.
+  - JSON form: full per-repo data — workspace + every `RepoStatus`
+    + the embedded `RepoState`. `--all` is a no-op for JSON.
+- **Porcelain types now `Serialize`.** `RepoState`, `BranchInfo`,
+  `WorkingTreeInfo`, and `InProgressOp` all derive `serde::Serialize`
+  so they embed cleanly in `WsStatusOutput`'s JSON shape.
+- **`RepoState::detect_at(path)`.** The shared porcelain substrate
+  gains a path-aware entry point (extracted in Slice E1, consumed
+  by `ws status` here). `git -C <path>` shellouts replace the
+  cwd-implicit ones; `marshal what-now` continues to use the
+  cwd-bound `detect()` (one-line wrapper over `detect_at`).
+
+### Changed
+
+- `marshal what-now`'s state extraction moves from
+  `commands/what_now/state.rs` into `git::porcelain` (Slice E1).
+  Pure refactor — no functional change. `commands/what_now/state.rs`
+  is removed; rule files now import from `crate::git::porcelain`.
+  All 12 parser/in-progress unit tests move with the code.
+
 - **`ws init`.** First workspace command that writes to disk.
   Creates `<cwd>/.workspace/` with a starter `manifest.toml`
   (`[workspace] name = "…" default_branch = "…"`) and an empty
