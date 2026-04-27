@@ -6,13 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work in progress on `0.3.0` — completing Phase 1. Four chunks shipped
+Work in progress on `0.3.0` — completing Phase 1. Five chunks shipped
 so far: the actionable error hints architecture plus 13 of ~20 rules,
-`marshal what-now`, and now JSON output across the marshal namespace
-on the back of a Strategy/Command refactor that locks Invariant 10
-into place. Still to come: context-aware `help` and (opportunistically)
-the remaining low-frequency hint rules. See
+`marshal what-now`, JSON output across the marshal namespace via the
+Strategy/Command refactor that locks Invariant 10 into place, and now
+`marshal help` — context-aware overview plus four reference topics.
+Remaining for the milestone: opportunistically the low-frequency hint
+rules and (deferred) human-output colourisation. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- **`marshal help` (and `marshal help <topic>`).** On-CLI reference
+  built on the same Strategy + Registry pattern as the rest of the
+  namespace. `Help` is a `Command` whose output (`HelpOutput`) carries
+  a topic name, title, and a list of `HelpSection { heading, body[] }`.
+  Implements `Renderable` for the human form and derives
+  `serde::Serialize` so `--json` works automatically.
+- **`HelpContext`** detects whether the cwd is inside a git repository
+  (one cheap `git rev-parse --is-inside-work-tree` shellout, stdio
+  silenced). Detection failures degrade to "outside" — the worst-case
+  interpretation never makes the help wrong, only less specific.
+- **Five topics shipped with the slice:**
+  - `overview` — landing screen, context-aware first section: in a
+    repo it recommends `marshal what-now` and `git status`; outside
+    it recommends `git init` / `cd`. Lists subcommands, every
+    configuration key (sourced from `ConfigKey::all()` so future
+    keys auto-show), available topics, the `--json` global flag,
+    and pointers to project + design docs.
+  - `config` — three-tier model, every command form, both Unix and
+    Windows paths per layer, every known key, env var overrides
+    (`MARSHAL_CONFIG`, …), and the malformed-config robustness note.
+  - `hints` — summary, output format, the `errors.actionable_hints`
+    toggle, and a tabulated list of all 13 currently-shipped rule
+    ids with the stderr substring each matches.
+  - `modernize` — summary, output format, the two settings
+    (`modernize.tips`, `modernize.rewrite`), and the four families
+    covered (12 patterns / 11 rule impls).
+  - `what-now` — summary, invocation forms (human / `--json`), the
+    9-rule priority chain, and the data sources (`git status
+    --porcelain=v2 --branch` + `<git-dir>/*` markers; explicit
+    "no human-readable git output is parsed" disclaimer).
+- **Sync guards** on `hints` and `what-now` topics: tests assert that
+  every rule id shipped in `error_hints/rules/` and every priority
+  step in `what_now/rules/` is mentioned in the corresponding help
+  body. Adding a new rule without touching the topic body fails the
+  test.
+
+### Changed
+
+- `cli::dispatch` gains a `Some("help")` arm calling
+  `run_command(Help, args[1..], format)` — one registration line, no
+  modification of any existing command (Invariant 10).
+- The marshal-namespace overview output (`git marshal` no arg) now
+  lists `help` alongside `config` and `what-now`.
 
 ### Added
 

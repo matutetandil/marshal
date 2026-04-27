@@ -55,7 +55,13 @@ The product is built in phases, each self-contained and releasable. Each phase e
   Remaining ~7 rules cover progressively rarer failures (cannot lock
   ref, branch -D not fully merged, dubious permissions on `~/.ssh`, …)
   and will land opportunistically.
-- [ ] `help` command with context-awareness
+- [x] `help` command with context-awareness — shipped on `main`
+  (mid-cycle, see CHANGELOG `[Unreleased]`). `marshal help` (no arg)
+  prints a context-aware overview that adapts based on whether the
+  cwd is inside a git repository (recommends `what-now` / `git status`)
+  or outside one (recommends `git init` / `cd`). Five topics
+  (`overview`, `config`, `hints`, `modernize`, `what-now`). `--json`
+  works for free thanks to the Command/Renderable substrate.
 - [x] `what-now` command that analyzes current state and suggests next actions —
   shipped on `main` (mid-cycle, see CHANGELOG `[Unreleased]`). State
   read via `git status --porcelain=v2 --branch` + `.git/*` filesystem

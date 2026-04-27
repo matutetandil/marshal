@@ -132,6 +132,39 @@ The advice picks the most-relevant rule for the situation; the chain runs from "
 
 State is read once via `git status --porcelain=v2 --branch` plus a few filesystem checks against `.git/` markers (`MERGE_HEAD`, `rebase-merge/`, `CHERRY_PICK_HEAD`, …). No human-readable git output is parsed.
 
+### `marshal help`
+
+The on-CLI reference. `marshal help` (no arg) prints a context-aware overview that adapts based on whether you are inside a git repository or outside one — the recommended next moves change accordingly. `marshal help <topic>` dives into a specific topic.
+
+```
+$ git marshal help
+Marshal 0.3.0 — a transparent wrapper for git.
+
+You're inside a Git repository. Quick start:
+  marshal what-now           See what you should do next.
+  marshal config list        Inspect Marshal's configuration.
+  git status                 Standard git (passes through unchanged).
+
+Subcommands:
+  config     Manage Marshal configuration (get/set/unset/list).
+  what-now   Analyse repo state and suggest the next action.
+  help       Print this overview, or `help <topic>` for details.
+
+…
+```
+
+Topics shipped:
+
+| Topic       | What it covers                                                                  |
+|-------------|---------------------------------------------------------------------------------|
+| `overview`  | This screen (context-aware). Default when no topic is given.                    |
+| `config`    | Three-tier configuration system (system < global < local), every key, env var overrides. |
+| `hints`     | Actionable error hints, the `errors.actionable_hints` toggle, all rule ids.     |
+| `modernize` | Modernization tips, the two settings, every family covered.                     |
+| `what-now`  | The `what-now` rule chain in priority order, data sources, JSON shape.          |
+
+`--json` works here too: `marshal help --json` (or `marshal help config --json`) emits the topic structure as `{topic, title, sections: [{heading, body[]}]}`.
+
 ### JSON output (`--json`)
 
 Every command in the marshal namespace accepts a global `--json` flag (anywhere in argv) that switches stdout from the human form to a structured JSON payload. Made for scripting and tooling; the human form stays the default everywhere else.
