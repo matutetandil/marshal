@@ -4,7 +4,7 @@
 //! "another repository-state hint" lands next to its siblings. Each
 //! file contains one or more rules and their unit tests.
 //!
-//! Current coverage (6 of the planned ~20 hints):
+//! Current coverage (9 of the planned ~20 hints):
 //!
 //! * **repository.rs** — `not a git repository`.
 //! * **ownership.rs** — `detected dubious ownership`.
@@ -12,13 +12,19 @@
 //! * **push.rs** — non-fast-forward push rejection.
 //! * **working_tree.rs** — `local changes would be overwritten`.
 //! * **merge.rs** — `refusing to merge unrelated histories`.
+//! * **pathspec.rs** — `pathspec '…' did not match any file`.
+//! * **refs.rs** — `ambiguous argument: unknown revision`.
+//! * **setup.rs** — empty author identity / `Author identity unknown`.
 
 use super::Registry;
 
 mod merge;
 mod ownership;
+mod pathspec;
 mod push;
+mod refs;
 mod repository;
+mod setup;
 mod ssh;
 mod working_tree;
 
@@ -34,4 +40,7 @@ pub fn register_defaults(registry: &mut Registry) {
     registry.register(Box::new(push::PushNonFastForward));
     registry.register(Box::new(working_tree::LocalChangesWouldBeOverwritten));
     registry.register(Box::new(merge::UnrelatedHistories));
+    registry.register(Box::new(pathspec::PathspecNoMatch));
+    registry.register(Box::new(refs::AmbiguousArgument));
+    registry.register(Box::new(setup::EmptyIdent));
 }
