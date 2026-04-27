@@ -7,6 +7,7 @@
 
 pub mod clone;
 pub mod config;
+pub mod help;
 pub mod init;
 pub mod log;
 pub mod passthrough;

@@ -904,6 +904,86 @@ fn malformed_config_falls_back_to_defaults_with_a_warning() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `marshal help`
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `marshal help` (no arg) lands on the overview topic.
+#[test]
+fn help_with_no_arg_shows_overview() {
+    let output = marshal()
+        .args(["marshal", "help"])
+        .output()
+        .expect("run marshal help");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Marshal"));
+    assert!(stdout.contains("Subcommands:"));
+    assert!(stdout.contains("config"));
+    assert!(stdout.contains("what-now"));
+}
+
+/// `marshal help overview` resolves the named topic explicitly.
+#[test]
+fn help_with_named_topic_resolves_it() {
+    let output = marshal()
+        .args(["marshal", "help", "overview"])
+        .output()
+        .expect("run marshal help overview");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Subcommands:"));
+}
+
+/// Unknown topic exits non-zero and lists available topics.
+#[test]
+fn help_with_unknown_topic_errors_with_hint() {
+    let output = marshal()
+        .args(["marshal", "help", "totally-not-a-topic"])
+        .output()
+        .expect("run marshal help <bogus>");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown help topic 'totally-not-a-topic'"));
+    assert!(stderr.contains("overview"));
+}
+
+/// `--json` flips the help output to a structured JSON shape with
+/// `topic`, `title`, and `sections[]`.
+#[test]
+fn help_json_emits_structured_payload() {
+    let output = marshal()
+        .args(["marshal", "help", "--json"])
+        .output()
+        .expect("run marshal help --json");
+    assert!(output.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    assert_eq!(parsed["topic"], "overview");
+    assert!(parsed["title"].is_string());
+    let sections = parsed["sections"].as_array().expect("sections is array");
+    assert!(!sections.is_empty());
+    // Each section has heading + body (array of strings).
+    let first = &sections[0];
+    assert!(first["heading"].is_string());
+    assert!(first["body"].is_array());
+}
+
+/// The marshal-namespace overview (no help arg) advertises help.
+#[test]
+fn marshal_overview_advertises_help() {
+    let output = marshal()
+        .arg("marshal")
+        .output()
+        .expect("run marshal marshal");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("help"),
+        "overview should list help, got: {stdout}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `--json` global output flag
 // ───────────────────────────────────────────────────────────────────────────
 

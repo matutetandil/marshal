@@ -134,6 +134,7 @@ pub fn dispatch(args: &[OsString]) -> Result<ExitCode> {
             Ok(ExitCode::from(0))
         }
         Some("config") => crate::commands::config::dispatch(&args[1..], format),
+        Some("help") => run_command(crate::commands::help::Help, &args[1..], format),
         Some("what-now") => run_command(crate::commands::what_now::WhatNow, &args[1..], format),
         Some(sub) => {
             eprintln!("marshal: unknown subcommand '{sub}'. Run 'git marshal' for the list.");
@@ -178,8 +179,9 @@ fn print_overview() {
     println!("Marshal subcommands:");
     println!("  config     Manage Marshal configuration (get/set/unset/list)");
     println!("  what-now   Analyse repo state and suggest the next action");
+    println!("  help       Print this overview, or `help <topic>` for details");
     println!();
-    println!("More subcommands appear as they ship; see the project CHANGELOG.");
+    println!("Run `marshal help` for a comprehensive reference (topic-by-topic).");
 }
 
 #[cfg(test)]
