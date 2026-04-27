@@ -23,13 +23,32 @@
 //! * **DIP** — the entry point depends on the registry trait, never
 //!   on concrete rules.
 
-#![allow(dead_code)] // Entry point and registry are wired up in W4 (CLI dispatch).
-
 pub mod rule;
 pub mod rules;
 pub mod state;
 
 pub use rule::{Advice, AdviceRule};
+
+use anyhow::Result;
+use std::process::ExitCode;
+
+/// Entry point invoked by `cli::dispatch` for `marshal what-now`.
+///
+/// Reads the current repo state once, runs it through the canonical
+/// rule registry, and prints the first matching advice on stdout.
+/// The catch-all `clean` rule guarantees every successful detection
+/// produces output — `first_advice` returning `None` here would be a
+/// registry bug, but `run` falls back to a generic line just to be
+/// resilient.
+pub fn run() -> Result<ExitCode> {
+    let state = state::RepoState::detect()?;
+    let registry = Registry::default();
+    match registry.first_advice(&state) {
+        Some(advice) => advice.render_to_stdout(),
+        None => println!("Nothing to advise — registry produced no advice (this is a bug)."),
+    }
+    Ok(ExitCode::from(0))
+}
 
 pub struct Registry {
     rules: Vec<Box<dyn AdviceRule>>,

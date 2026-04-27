@@ -25,6 +25,7 @@ pub fn dispatch(args: &[OsString]) -> Result<ExitCode> {
             Ok(ExitCode::from(0))
         }
         Some("config") => crate::commands::config::dispatch(&args[1..]),
+        Some("what-now") => crate::commands::what_now::run(),
         Some(sub) => {
             eprintln!("marshal: unknown subcommand '{sub}'. Run 'git marshal' for the list.");
             Ok(ExitCode::from(2))
@@ -40,7 +41,8 @@ fn print_overview() {
     println!("`marshal`, which routes to marshal's own namespace.");
     println!();
     println!("Marshal subcommands:");
-    println!("  config    Manage Marshal configuration (get/set/unset/list)");
+    println!("  config     Manage Marshal configuration (get/set/unset/list)");
+    println!("  what-now   Analyse repo state and suggest the next action");
     println!();
     println!("More subcommands appear as they ship; see the project CHANGELOG.");
 }

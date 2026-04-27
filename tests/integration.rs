@@ -904,6 +904,166 @@ fn malformed_config_falls_back_to_defaults_with_a_warning() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `marshal what-now`
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `what-now` outside any repository fails cleanly with a message
+/// pointing at the cause. Exit code is non-zero so scripts can react.
+#[test]
+fn what_now_fails_cleanly_outside_a_repository() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let non_repo = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(non_repo.path())
+        .args(["marshal", "what-now"])
+        .output()
+        .expect("run marshal what-now");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not in a git repository"),
+        "expected 'not in a git repository' on stderr, got: {stderr}"
+    );
+}
+
+/// `what-now` in a fresh repo with no commits yet picks the
+/// `initial-state` rule.
+#[test]
+fn what_now_in_fresh_repo_recommends_first_commit() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let repo = init_git_repo();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(repo.path())
+        .args(["marshal", "what-now"])
+        .output()
+        .expect("run marshal what-now in fresh repo");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Fresh repository"),
+        "expected fresh-repo title, got: {stdout}"
+    );
+    assert!(stdout.contains("git commit -m \"initial\""));
+}
+
+/// `what-now` on a repo with uncommitted changes picks the
+/// `uncommitted-changes` rule and composes the title from the buckets
+/// that have content.
+#[test]
+fn what_now_reports_uncommitted_changes_with_bucket_breakdown() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let repo = init_git_repo();
+
+    // Create a baseline commit so we're past `initial-state`.
+    std::fs::write(repo.path().join("seed.txt"), b"seed").unwrap();
+    StdCommand::new("git")
+        .current_dir(repo.path())
+        .args(["add", "seed.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(repo.path())
+        .args(["commit", "-q", "-m", "seed"])
+        .status()
+        .unwrap();
+
+    // Now create one staged, one unstaged, one untracked. We achieve
+    // the staged+unstaged combo by editing the same file after staging
+    // (M. → MM after a second edit).
+    std::fs::write(repo.path().join("seed.txt"), b"v2").unwrap();
+    StdCommand::new("git")
+        .current_dir(repo.path())
+        .args(["add", "seed.txt"])
+        .status()
+        .unwrap();
+    std::fs::write(repo.path().join("seed.txt"), b"v3").unwrap();
+    std::fs::write(repo.path().join("new.txt"), b"new").unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(repo.path())
+        .args(["marshal", "what-now"])
+        .output()
+        .expect("run marshal what-now");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Working tree has"),
+        "expected uncommitted-changes title, got: {stdout}"
+    );
+    // All three buckets must show up — staged (the seed file's M),
+    // unstaged (the second edit's M), and untracked (new.txt).
+    assert!(stdout.contains("staged"), "got: {stdout}");
+    assert!(stdout.contains("unstaged"), "got: {stdout}");
+    assert!(stdout.contains("untracked"), "got: {stdout}");
+    // Suggestions cover the round-trip.
+    assert!(stdout.contains("git diff"));
+    assert!(stdout.contains("git add"));
+    assert!(stdout.contains("git commit"));
+}
+
+/// A clean repo with one commit and nothing changed gets the catch-all
+/// `clean` rule.
+#[test]
+fn what_now_in_clean_repo_reports_clean_state() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let repo = init_git_repo();
+
+    std::fs::write(repo.path().join("seed.txt"), b"seed").unwrap();
+    StdCommand::new("git")
+        .current_dir(repo.path())
+        .args(["add", "seed.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(repo.path())
+        .args(["commit", "-q", "-m", "seed"])
+        .status()
+        .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(repo.path())
+        .args(["marshal", "what-now"])
+        .output()
+        .expect("run marshal what-now in clean repo");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Working tree clean"),
+        "expected clean title, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("on `main`"),
+        "expected branch label, got: {stdout}"
+    );
+}
+
+/// `git marshal` (no subcommand) lists `what-now` in the overview so
+/// users can discover it.
+#[test]
+fn marshal_overview_advertises_what_now() {
+    let output = marshal()
+        .arg("marshal")
+        .output()
+        .expect("run marshal marshal");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("what-now"),
+        "overview should list what-now, got: {stdout}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Actionable error hints
 // ───────────────────────────────────────────────────────────────────────────
 
