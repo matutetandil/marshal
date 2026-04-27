@@ -6,12 +6,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work in progress on `0.3.0` — completing Phase 1. Two chunks shipped so
-far: the architecture for actionable error hints plus 13 of the planned
-~20 rules, covering most of the high-friction Git failures a developer
-hits in real use. Still to come: a few more hint rules toward the
-remaining low-frequency cases, context-aware `help`, the `what-now`
-command, and JSON output modes. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Work in progress on `0.3.0` — completing Phase 1. Three chunks shipped
+so far: the actionable error hints architecture plus 13 of ~20 rules,
+and now `marshal what-now` — the proactive counterpart to hints. Still
+to come: context-aware `help`, JSON output modes, and (opportunistically)
+the remaining low-frequency hint rules. See
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- **`marshal what-now`.** Reads the cold state of the repository and
+  prints one concrete next step on stdout. Reactive counterpart to
+  the actionable error hints: hints fire on a failed git command,
+  `what-now` is the user-invoked "what should I do here?" call.
+
+  Built on the same Strategy + Registry pattern as `error_hints/`
+  and `modernize/`:
+  - `commands::what_now::state::RepoState` — snapshot built from
+    `git status --porcelain=v2 --branch` (machine-readable, stable
+    format) plus filesystem checks against `<git-dir>/MERGE_HEAD`,
+    `rebase-merge/`, `rebase-apply/`, `CHERRY_PICK_HEAD`,
+    `REVERT_HEAD`, `BISECT_LOG`. No human-readable git output is
+    parsed. `BranchInfo` (name / detached / initial / upstream /
+    ahead / behind), `WorkingTreeInfo` (staged / unstaged /
+    untracked / unmerged counters), `InProgressOp` (None / Merge /
+    Rebase / CherryPick / Revert / Bisect — Rebase wins over Merge
+    when both markers are present).
+  - `commands::what_now::rule::AdviceRule` — Strategy trait with
+    `examine(&RepoState) -> Option<Advice>`. `Advice` carries a
+    `rule_id`, a one-line title, and bullet suggestions. Renders to
+    **stdout** (not stderr) — `what-now` is a user-invoked command
+    and the advice is its output.
+  - `commands::what_now::Registry` — `first_advice(&state)` returns
+    the first matching rule's advice. Default seeded with the
+    canonical chain.
+
+  Nine rules in priority order:
+  1. `merge-conflict` — abort command adapts to active op
+     (rebase / cherry-pick / revert / merge).
+  2. `*-in-progress` — one rule branching on the active op
+     (rebase / cherry-pick / revert / bisect / paused-merge), each
+     with its own continue / skip / abort triplet.
+  3. `initial-state` — fresh repo, no commits.
+  4. `detached-head` — front-loads `git switch -c <name>` so commits
+     here don't get orphaned on switch.
+  5. `uncommitted-changes` — title composes only the buckets that
+     have files; suggestions drop irrelevant lines (no `git diff`
+     when pure untracked, no `git add` when pure staged).
+  6. `diverged` — both ahead and behind. `git pull --rebase`, push.
+  7. `behind-upstream` — behind only.
+  8. `unpushed-commits` / `unpushed-commits-no-upstream` — ahead
+     only, two distinct shapes for "have upstream → `git push`"
+     versus "no upstream → `git push -u origin <branch>`".
+  9. `clean` — catch-all so every state produces advice.
+- **CLI dispatch** — `Some("what-now")` arm in `cli::dispatch`,
+  plus an entry in the `git marshal` overview output so users
+  discover it.
 
 ### Added
 

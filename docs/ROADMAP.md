@@ -56,7 +56,12 @@ The product is built in phases, each self-contained and releasable. Each phase e
   ref, branch -D not fully merged, dubious permissions on `~/.ssh`, …)
   and will land opportunistically.
 - [ ] `help` command with context-awareness
-- [ ] `what-now` command that analyzes current state and suggests next actions
+- [x] `what-now` command that analyzes current state and suggests next actions —
+  shipped on `main` (mid-cycle, see CHANGELOG `[Unreleased]`). State
+  read via `git status --porcelain=v2 --branch` + `.git/*` filesystem
+  markers, fed through a Strategy registry of 9 advice rules
+  (priority-ordered: conflict → in-progress → initial → detached →
+  uncommitted → diverged → behind → ahead → clean).
 - [ ] Output modes: human (colors, interactive) and machine (JSON, scripting)
 
 ### Modernization Policy

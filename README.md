@@ -103,6 +103,35 @@ git marshal config set errors.actionable_hints false
 
 Disabling restores byte-exact passthrough — stderr inheritance is turned back on so even Marshal's stderr capture goes away.
 
+### `marshal what-now`
+
+The proactive counterpart to error hints: read the cold state of the repository and print one concrete next step. Useful when you walk into a repo and want a one-line "what was I doing?" without scanning `git status`.
+
+```
+$ git marshal what-now
+Working tree has 2 staged, 1 unstaged, and 3 untracked changes.
+  • Review changes: `git diff` (unstaged) and `git diff --cached` (staged).
+  • Stage all of it: `git add -A`. Stage selectively: `git add <path>`.
+  • Commit the staged set: `git commit -m "<message>"`.
+  • Save for later instead: `git stash push -m "wip"` (re-apply with `git stash pop`).
+```
+
+The advice picks the most-relevant rule for the situation; the chain runs from "things blocking everything else" down to "all clear":
+
+| Priority | Rule(s)                         | When                                                                            |
+|----------|---------------------------------|---------------------------------------------------------------------------------|
+| 1        | `merge-conflict`                | Unresolved conflicts — abort command adapts to merge / rebase / cherry-pick / revert |
+| 2        | `*-in-progress`                 | rebase / cherry-pick / revert / bisect / paused-merge — continue / skip / abort |
+| 3        | `initial-state`                 | `git init` happened, no commits yet                                             |
+| 4        | `detached-head`                 | HEAD not on a branch                                                            |
+| 5        | `uncommitted-changes`           | staged / unstaged / untracked — bucket breakdown adapts to what's there         |
+| 6        | `diverged`                      | Branch is ahead **and** behind upstream                                         |
+| 7        | `behind-upstream`               | Branch is behind only                                                           |
+| 8        | `unpushed-commits`              | Branch is ahead only — different shape with vs without configured upstream      |
+| 9        | `clean`                         | Catch-all: nothing to flag                                                      |
+
+State is read once via `git status --porcelain=v2 --branch` plus a few filesystem checks against `.git/` markers (`MERGE_HEAD`, `rebase-merge/`, `CHERRY_PICK_HEAD`, …). No human-readable git output is parsed.
+
 ### Version line
 
 `git --version` identifies every tool in the chain, node+npm / php+xdebug style:
