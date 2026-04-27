@@ -353,6 +353,7 @@ dependencies = [
  "owo-colors",
  "predicates",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "toml",
