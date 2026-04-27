@@ -1398,6 +1398,209 @@ fn marshal_overview_advertises_ws_namespace() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `ws init`
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `ws init` in a clean directory creates `.workspace/manifest.toml`
+/// and `.workspace/state.toml` with sensible defaults (name from
+/// the cwd basename, branch from git config or "main").
+#[test]
+fn ws_init_creates_manifest_and_state_with_defaults() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let target_parent = TempDir::new().unwrap();
+    let target = target_parent.path().join("my-init-project");
+    std::fs::create_dir(&target).unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&target)
+        .args(["ws", "init"])
+        .output()
+        .expect("run ws init");
+    assert!(
+        output.status.success(),
+        "expected success, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest_path = target.join(".workspace").join("manifest.toml");
+    let state_path = target.join(".workspace").join("state.toml");
+    assert!(manifest_path.exists());
+    assert!(state_path.exists());
+
+    let manifest_content = std::fs::read_to_string(&manifest_path).unwrap();
+    assert!(manifest_content.contains("name = \"my-init-project\""));
+    // No repos section because Vec::is_empty triggers skip.
+    assert!(
+        !manifest_content.contains("[[repos]]") && !manifest_content.contains("repos = []"),
+        "empty repos should not pollute the file, got: {manifest_content}"
+    );
+
+    let state_content = std::fs::read_to_string(&state_path).unwrap();
+    assert!(
+        state_content.contains("# state.toml"),
+        "state.toml should carry a header comment, got: {state_content}"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Initialised workspace"));
+    assert!(stdout.contains("my-init-project"));
+}
+
+/// `--name` and `--default-branch` flags override the defaults.
+#[test]
+fn ws_init_respects_name_and_default_branch_flags() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let target = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(target.path())
+        .args([
+            "ws",
+            "init",
+            "--name",
+            "explicit-name",
+            "--default-branch",
+            "trunk",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let manifest =
+        std::fs::read_to_string(target.path().join(".workspace").join("manifest.toml")).unwrap();
+    assert!(manifest.contains("name = \"explicit-name\""));
+    assert!(manifest.contains("default_branch = \"trunk\""));
+}
+
+/// `--name=foo` (equals form) is also accepted.
+#[test]
+fn ws_init_accepts_equals_form_flags() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let target = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(target.path())
+        .args(["ws", "init", "--name=eq-form", "--default-branch=develop"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let manifest =
+        std::fs::read_to_string(target.path().join(".workspace").join("manifest.toml")).unwrap();
+    assert!(manifest.contains("name = \"eq-form\""));
+    assert!(manifest.contains("default_branch = \"develop\""));
+}
+
+/// Re-initing inside an existing workspace fails without `--force`.
+#[test]
+fn ws_init_refuses_in_existing_workspace_without_force() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "init"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("already inside a marshal workspace"),
+        "expected refusal message, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("--force"),
+        "stderr should mention the --force escape hatch, got: {stderr}"
+    );
+}
+
+/// `--force` overwrites the manifest and re-initialises.
+#[test]
+fn ws_init_force_overwrites_existing_manifest() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "before"
+        default_branch = "main"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "init", "--name", "after", "--force"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let manifest =
+        std::fs::read_to_string(ws.path().join(".workspace").join("manifest.toml")).unwrap();
+    assert!(
+        manifest.contains("name = \"after\""),
+        "manifest should reflect the new name, got: {manifest}"
+    );
+    assert!(!manifest.contains("name = \"before\""));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Re-initialised"));
+}
+
+/// JSON form returns `{root, workspace_name, default_branch,
+/// created_files, forced}`.
+#[test]
+fn ws_init_json_emits_structured_output() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let target = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(target.path())
+        .args(["ws", "init", "--name", "json-test", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["workspace_name"], "json-test");
+    assert!(parsed["default_branch"].is_string());
+    assert!(parsed["root"].is_string());
+    assert_eq!(parsed["forced"], false);
+    let files = parsed["created_files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert!(files
+        .iter()
+        .any(|f| f.as_str().unwrap().ends_with("manifest.toml")));
+    assert!(files
+        .iter()
+        .any(|f| f.as_str().unwrap().ends_with("state.toml")));
+}
+
+/// Unknown flags are rejected with a helpful error.
+#[test]
+fn ws_init_rejects_unknown_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let target = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(target.path())
+        .args(["ws", "init", "--bogus"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unexpected argument '--bogus'"),
+        "expected unknown-flag error, got: {stderr}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal help`
 // ───────────────────────────────────────────────────────────────────────────
 

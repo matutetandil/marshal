@@ -34,6 +34,8 @@ use crate::context;
 use crate::workspace::manifest::Manifest;
 use crate::workspace::state::StateDeclaration;
 
+mod init;
+
 /// Threshold for "show full list inline" vs "show count + interesting only".
 /// Below or equal to this, the human form expands unconditionally; above it,
 /// the abbreviation kicks in unless `--all` is set.
@@ -45,14 +47,15 @@ const ABBREVIATE_THRESHOLD: usize = 5;
 pub fn dispatch(args: &[OsString], all: bool, format: OutputFormat) -> Result<ExitCode> {
     match args.first().and_then(|s| s.to_str()) {
         // Bare `git ws` — print the current workspace context.
-        // Future subcommands (init, status, log, diff, clone) land
-        // as additional arms in Phase 2 / Slices D–J.
         None => run_command(WsContextInfo { all }, args, format),
+        // `git ws init` — create a `.workspace/` directory here.
+        Some("init") => run_command(init::WsInit, &args[1..], format),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
-                 Run `git ws` for the workspace context. \
-                 More subcommands arrive in Phase 2 — see ROADMAP.md."
+                 Run `git ws` for the workspace context, or \
+                 `git ws init` to create one. More subcommands \
+                 arrive in Phase 2 — see ROADMAP.md."
             );
             Ok(ExitCode::from(2))
         }

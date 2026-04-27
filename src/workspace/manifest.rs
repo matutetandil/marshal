@@ -19,14 +19,20 @@ use std::path::Path;
 use crate::context::{MANIFEST_FILE, WORKSPACE_MARKER};
 
 /// A parsed manifest. This is the in-memory representation of manifest.toml.
+///
+/// `skip_serializing_if` on the optional collections keeps a freshly
+/// `ws init`-ed manifest minimal: an empty `repos` and `affinities`
+/// would otherwise show up as `repos = []` / `[affinities]` noise on
+/// disk. Round-trip stays correct because `#[serde(default)]` fills
+/// them back in on deserialize.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Manifest {
     pub workspace: WorkspaceMeta,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repos: Vec<RepoEntry>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub affinities: HashMap<String, RepoAffinity>,
 }
 
