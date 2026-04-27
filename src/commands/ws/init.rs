@@ -314,17 +314,25 @@ mod tests {
         assert!(!value.is_empty());
     }
 
-    /// `WORKSPACE_MARKER` and `MANIFEST_FILE` / `STATE_FILE` are
-    /// kept in sync between `context.rs` and the path-building
-    /// here. This is a sanity check, not a behavioural test —
-    /// catches accidental rename of the constants.
+    /// `WORKSPACE_MARKER`, `MANIFEST_FILE`, `STATE_FILE` are kept
+    /// in sync between `context.rs` and the path-building here.
+    /// Sanity check, not a behavioural test — catches accidental
+    /// rename of the constants. Asserts the values directly so
+    /// the test stays platform-agnostic (`PathBuf::join` uses `\`
+    /// on Windows and `/` elsewhere; comparing string-formed paths
+    /// would diverge between platforms).
     #[test]
-    fn workspace_path_constants_compose_to_real_subpaths() {
-        let p = PathBuf::from(WORKSPACE_MARKER);
-        assert_eq!(p.to_str(), Some(".workspace"));
-        let manifest = p.join(MANIFEST_FILE);
-        assert_eq!(manifest.to_str(), Some(".workspace/manifest.toml"));
+    fn workspace_path_constants_have_expected_names() {
+        assert_eq!(WORKSPACE_MARKER, ".workspace");
+        assert_eq!(MANIFEST_FILE, "manifest.toml");
+        assert_eq!(STATE_FILE, "state.toml");
+
+        // `PathBuf::join` composes correctly on every platform; we
+        // don't compare the rendered string but we do check that
+        // the leaf is what we expect.
+        let manifest = PathBuf::from(WORKSPACE_MARKER).join(MANIFEST_FILE);
+        assert_eq!(manifest.file_name().unwrap(), MANIFEST_FILE);
         let state = PathBuf::from(WORKSPACE_MARKER).join(STATE_FILE);
-        assert_eq!(state.to_str(), Some(".workspace/state.toml"));
+        assert_eq!(state.file_name().unwrap(), STATE_FILE);
     }
 }
