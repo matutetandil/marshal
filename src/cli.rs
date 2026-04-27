@@ -141,7 +141,11 @@ pub fn dispatch(args: &[OsString]) -> Result<ExitCode> {
             // place the format is selected.
             crate::commands::config::dispatch(&args[1..], OutputFormat::default())
         }
-        Some("what-now") => crate::commands::what_now::run(),
+        Some("what-now") => run_command(
+            crate::commands::what_now::WhatNow,
+            &args[1..],
+            OutputFormat::default(),
+        ),
         Some(sub) => {
             eprintln!("marshal: unknown subcommand '{sub}'. Run 'git marshal' for the list.");
             Ok(ExitCode::from(2))

@@ -11,6 +11,10 @@
 //! rule sits at the end of the chain so every state produces some
 //! advice.
 
+use crate::cli::Renderable;
+use serde::Serialize;
+use std::io::{self, Write};
+
 use super::state::RepoState;
 
 /// Strategy: examine the current repo state and decide whether to
@@ -21,12 +25,17 @@ pub trait AdviceRule: Send + Sync {
     fn examine(&self, state: &RepoState) -> Option<Advice>;
 }
 
-/// A user-facing advice rendered by `marshal what-now`.
+/// A user-facing advice produced by `marshal what-now`.
 ///
-/// Renders to **stdout** (not stderr): unlike modernization tips and
-/// error hints, `what-now` is a user-invoked command and the advice
-/// *is* its output. Stderr stays available for diagnostics.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Doubles as the [`Command`] output for the what-now subcommand:
+/// implements [`Renderable`] for the canonical Marshal bullet
+/// format on stdout, and `serde::Serialize` for the JSON form
+/// (see Invariant 10 in `docs/PRINCIPLES.md` — every command's
+/// output speaks both formats so `--json` is a no-op switch in
+/// the dispatcher).
+///
+/// [`Command`]: crate::cli::Command
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Advice {
     pub rule_id: &'static str,
 
@@ -39,13 +48,12 @@ pub struct Advice {
     pub suggestions: Vec<String>,
 }
 
-impl Advice {
-    /// Emit the advice on stdout in the canonical Marshal bullet
-    /// format, matching the indentation used by error hints.
-    pub fn render_to_stdout(&self) {
-        println!("{}", self.title);
+impl Renderable for Advice {
+    fn render_human(&self, w: &mut dyn Write) -> io::Result<()> {
+        writeln!(w, "{}", self.title)?;
         for line in &self.suggestions {
-            println!("  • {line}");
+            writeln!(w, "  • {line}")?;
         }
+        Ok(())
     }
 }

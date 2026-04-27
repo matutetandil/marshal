@@ -29,25 +29,34 @@ pub mod state;
 
 pub use rule::{Advice, AdviceRule};
 
-use anyhow::Result;
-use std::process::ExitCode;
+use anyhow::{anyhow, Result};
+use std::ffi::OsString;
 
-/// Entry point invoked by `cli::dispatch` for `marshal what-now`.
+use crate::cli::Command;
+
+/// `Command` impl for `marshal what-now`.
 ///
 /// Reads the current repo state once, runs it through the canonical
-/// rule registry, and prints the first matching advice on stdout.
-/// The catch-all `clean` rule guarantees every successful detection
-/// produces output — `first_advice` returning `None` here would be a
-/// registry bug, but `run` falls back to a generic line just to be
-/// resilient.
-pub fn run() -> Result<ExitCode> {
-    let state = state::RepoState::detect()?;
-    let registry = Registry::default();
-    match registry.first_advice(&state) {
-        Some(advice) => advice.render_to_stdout(),
-        None => println!("Nothing to advise — registry produced no advice (this is a bug)."),
+/// rule registry, and returns the first matching advice. Rendering
+/// (human / JSON) is the dispatcher's job; this command stays
+/// invariant to output format per Invariant 10.
+///
+/// The catch-all `clean` rule in the registry guarantees every
+/// successful detection produces an advice, so the `Option` from
+/// `first_advice` is converted to an `Err` only as a safety net
+/// against registry-construction bugs.
+pub struct WhatNow;
+
+impl Command for WhatNow {
+    type Output = Advice;
+
+    fn run(&self, _args: &[OsString]) -> Result<Self::Output> {
+        let state = state::RepoState::detect()?;
+        let registry = Registry::default();
+        registry
+            .first_advice(&state)
+            .ok_or_else(|| anyhow!("the advice registry produced no advice (this is a bug)"))
     }
-    Ok(ExitCode::from(0))
 }
 
 pub struct Registry {
