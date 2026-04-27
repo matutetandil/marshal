@@ -115,17 +115,17 @@ fn write_output<R: Renderable + Serialize>(
     Ok(())
 }
 
-// ── Dispatcher ────────────────────────────────────────────────────
+// ── Dispatchers ───────────────────────────────────────────────────
 
 /// Dispatch the argv that came *after* the literal `marshal` token.
 ///
 /// `--json` is a global flag accepted anywhere in argv. It is
 /// stripped here and the active [`OutputFormat`] is threaded into
-/// every subcommand. Per Invariant 10, this is the *only* place
-/// where the format is selected — concrete `Command` impls and
-/// their sub-dispatchers receive a format and obey it; they do not
-/// know about `--json` itself.
-pub fn dispatch(args: &[OsString]) -> Result<ExitCode> {
+/// every subcommand. Per Invariant 10, this is the *only* place in
+/// the marshal namespace where the format is selected — concrete
+/// `Command` impls and their sub-dispatchers receive a format and
+/// obey it; they do not know about `--json` itself.
+pub fn dispatch_marshal(args: &[OsString]) -> Result<ExitCode> {
     let (format, args) = extract_json_flag(args);
     let args = args.as_slice();
     match args.first().and_then(|s| s.to_str()) {
@@ -141,6 +141,16 @@ pub fn dispatch(args: &[OsString]) -> Result<ExitCode> {
             Ok(ExitCode::from(2))
         }
     }
+}
+
+/// Dispatch the argv that came *after* the literal `ws` token.
+///
+/// Sibling to [`dispatch_marshal`] — separate top-level namespace
+/// for workspace operations. `--json` semantics are the same:
+/// extracted here, threaded to every workspace subcommand.
+pub fn dispatch_ws(args: &[OsString]) -> Result<ExitCode> {
+    let (format, args) = extract_json_flag(args);
+    crate::commands::ws::dispatch(args.as_slice(), format)
 }
 
 /// Strip `--json` from `args` (anywhere in the slice — global flag
@@ -180,6 +190,9 @@ fn print_overview() {
     println!("  config     Manage Marshal configuration (get/set/unset/list)");
     println!("  what-now   Analyse repo state and suggest the next action");
     println!("  help       Print this overview, or `help <topic>` for details");
+    println!();
+    println!("Workspace operations live under their own namespace:");
+    println!("  git ws     Show current workspace context (init/status/log/… land in Phase 2)");
     println!();
     println!("Run `marshal help` for a comprehensive reference (topic-by-topic).");
 }

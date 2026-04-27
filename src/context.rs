@@ -1,15 +1,15 @@
 //! Workspace context detection.
 //!
-//! On every invocation, we walk up the filesystem from the current directory
-//! looking for a `.workspace/` marker directory. If found, we've identified
-//! a workspace root and can determine which child repo (if any) we're inside.
+//! On every invocation that needs to know "are we in a workspace?", we walk
+//! up the filesystem from the current directory looking for a `.workspace/`
+//! marker directory. If found, we've identified a workspace root and can
+//! determine which child repo (if any) we're inside.
 //!
 //! This mirrors how git finds the `.git/` directory of the current repo.
 //!
-//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0 (pure passthrough).
-//! The unit tests below keep the module honest.
-
-#![allow(dead_code)]
+//! Phase 2 makes this live: the new `ws` namespace consumes
+//! [`detect`] in `commands::ws`. Manifest/state file constants stay
+//! silenced until the manifest+state slices wire them in (Slices B and C).
 
 use anyhow::{Context as _, Result};
 use std::path::{Path, PathBuf};
@@ -18,12 +18,15 @@ use std::path::{Path, PathBuf};
 pub const WORKSPACE_MARKER: &str = ".workspace";
 
 /// The manifest file inside the workspace marker directory.
+#[allow(dead_code)] // Consumed by the manifest-parsing slice (Phase 2 / Slice B).
 pub const MANIFEST_FILE: &str = "manifest.toml";
 
 /// The state declaration file.
+#[allow(dead_code)] // Consumed by the state-parsing slice (Phase 2 / Slice C).
 pub const STATE_FILE: &str = "state.toml";
 
 /// The local (gitignored) subdirectory for per-developer state.
+#[allow(dead_code)] // Consumed by the staging slice (Phase 3).
 pub const LOCAL_DIR: &str = "local";
 
 /// A detected workspace context.

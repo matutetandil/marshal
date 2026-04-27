@@ -30,18 +30,10 @@ fn main() -> ExitCode {
     let parsed = git::parser::parse(&args);
 
     if parsed.subcommand_is("marshal") {
-        return match cli::dispatch(&parsed.subcommand_args) {
-            Ok(code) => code,
-            Err(err) => {
-                eprintln!("marshal: {err}");
-                let mut source = err.source();
-                while let Some(cause) = source {
-                    eprintln!("  caused by: {cause}");
-                    source = cause.source();
-                }
-                ExitCode::from(1)
-            }
-        };
+        return run_namespace(cli::dispatch_marshal, &parsed.subcommand_args, "marshal");
+    }
+    if parsed.subcommand_is("ws") {
+        return run_namespace(cli::dispatch_ws, &parsed.subcommand_args, "ws");
     }
 
     // Modernization hook gated by config.
@@ -114,6 +106,29 @@ fn main() -> ExitCode {
             exit_code_from(status)
         }
         commands::passthrough::Outcome::GitNotFound => ExitCode::from(127),
+    }
+}
+
+/// Run a namespace dispatcher and translate its `Result` into an
+/// `ExitCode`, walking the `anyhow` cause chain on error so the user
+/// sees every hop. Used by both the `marshal` and `ws` namespaces;
+/// `prefix` is the namespace name used in the error preamble.
+fn run_namespace(
+    dispatcher: fn(&[OsString]) -> anyhow::Result<ExitCode>,
+    args: &[OsString],
+    prefix: &str,
+) -> ExitCode {
+    match dispatcher(args) {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("{prefix}: {err}");
+            let mut source = err.source();
+            while let Some(cause) = source {
+                eprintln!("  caused by: {cause}");
+                source = cause.source();
+            }
+            ExitCode::from(1)
+        }
     }
 }
 

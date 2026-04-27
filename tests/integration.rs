@@ -904,6 +904,164 @@ fn malformed_config_falls_back_to_defaults_with_a_warning() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `ws` namespace — workspace context detection
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Create a synthetic workspace at a fresh `TempDir` by dropping a
+/// `.workspace/` marker into it. Returns the `TempDir` for lifetime
+/// management — the workspace is gone the moment the dir drops.
+fn make_workspace() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir(tmp.path().join(".workspace")).unwrap();
+    tmp
+}
+
+/// `git ws` at the workspace root prints the root path and reports
+/// the cwd as being at the root (not inside any child repo).
+#[test]
+fn ws_at_workspace_root_reports_root_and_no_child() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws"])
+        .output()
+        .expect("run git ws at workspace root");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Workspace at:"),
+        "expected workspace banner, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Current repo: (workspace root)"),
+        "expected workspace-root marker, got: {stdout}"
+    );
+}
+
+/// Inside a `<root>/src/<repo>/…` path, `git ws` reports the repo
+/// name by convention (will be reconciled against the manifest
+/// once parsing lands in Slice B).
+#[test]
+fn ws_inside_child_repo_reports_repo_name_by_convention() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+    let nested = ws.path().join("src").join("service-a").join("deep");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&nested)
+        .args(["ws"])
+        .output()
+        .expect("run git ws inside child repo");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Workspace at:"));
+    assert!(
+        stdout.contains("Current repo: service-a"),
+        "expected child repo identification, got: {stdout}"
+    );
+}
+
+/// `--json` emits `{root, current_repo}`. `current_repo` is omitted
+/// when at the workspace root (Option::is_none, skip_serializing_if).
+#[test]
+fn ws_json_includes_current_repo_only_when_inside_one() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+    let child = ws.path().join("src").join("svc-x");
+    std::fs::create_dir_all(&child).unwrap();
+
+    // At the root: current_repo absent.
+    let at_root = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "--json"])
+        .output()
+        .unwrap();
+    assert!(at_root.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&at_root.stdout).unwrap();
+    assert!(parsed["root"].is_string());
+    assert!(
+        parsed.get("current_repo").is_none(),
+        "current_repo should be absent at the workspace root, got: {parsed}"
+    );
+
+    // Inside a child repo: current_repo present and named.
+    let inside = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&child)
+        .args(["ws", "--json"])
+        .output()
+        .unwrap();
+    assert!(inside.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
+    assert_eq!(parsed["current_repo"], "svc-x");
+}
+
+/// Outside any workspace, `git ws` exits non-zero with a helpful
+/// message on stderr — same shape as `marshal what-now` outside a
+/// repo, just for workspaces instead.
+#[test]
+fn ws_outside_workspace_fails_cleanly() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let non_ws = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(non_ws.path())
+        .args(["ws"])
+        .output()
+        .expect("run git ws outside any workspace");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not in a marshal workspace"),
+        "expected 'not in a marshal workspace' on stderr, got: {stderr}"
+    );
+}
+
+/// An unknown `ws` subcommand exits non-zero with a hint pointing
+/// at the bare `git ws` overview.
+#[test]
+fn ws_unknown_subcommand_errors_with_hint() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "totally-not-a-real-command"])
+        .output()
+        .expect("run git ws <unknown>");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown subcommand 'totally-not-a-real-command'"),
+        "stderr names the unknown subcommand, got: {stderr}"
+    );
+}
+
+/// The marshal-namespace overview points at `git ws` so users
+/// discover the workspace namespace without having to read docs.
+#[test]
+fn marshal_overview_advertises_ws_namespace() {
+    let output = marshal().arg("marshal").output().expect("run git marshal");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("git ws"),
+        "marshal overview should advertise `git ws`, got: {stdout}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal help`
 // ───────────────────────────────────────────────────────────────────────────
 
