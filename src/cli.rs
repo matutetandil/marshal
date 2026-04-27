@@ -146,11 +146,35 @@ pub fn dispatch_marshal(args: &[OsString]) -> Result<ExitCode> {
 /// Dispatch the argv that came *after* the literal `ws` token.
 ///
 /// Sibling to [`dispatch_marshal`] — separate top-level namespace
-/// for workspace operations. `--json` semantics are the same:
-/// extracted here, threaded to every workspace subcommand.
+/// for workspace operations. `--json` and `--all` are extracted
+/// here and the resulting flags are threaded to every workspace
+/// subcommand. `--all` follows the universal "hide-boring +
+/// `--all` to expand" rule documented for workspace commands:
+/// every command picks its own definition of "boring" but obeys
+/// the same flag.
 pub fn dispatch_ws(args: &[OsString]) -> Result<ExitCode> {
     let (format, args) = extract_json_flag(args);
-    crate::commands::ws::dispatch(args.as_slice(), format)
+    let (all, args) = extract_all_flag(&args);
+    crate::commands::ws::dispatch(args.as_slice(), all, format)
+}
+
+/// Strip `--all` from `args` (anywhere in the slice — global flag
+/// semantics, same shape as `--json`). Used by [`dispatch_ws`].
+/// Workspace commands read the resulting flag from a field on
+/// their own `Command` struct; the trait surface stays unchanged.
+fn extract_all_flag(args: &[OsString]) -> (bool, Vec<OsString>) {
+    use std::ffi::OsStr;
+    let target = OsStr::new("--all");
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut all = false;
+    for arg in args {
+        if arg.as_os_str() == target {
+            all = true;
+        } else {
+            filtered.push(arg.clone());
+        }
+    }
+    (all, filtered)
 }
 
 /// Strip `--json` from `args` (anywhere in the slice — global flag

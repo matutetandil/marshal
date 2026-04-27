@@ -21,7 +21,6 @@ pub const WORKSPACE_MARKER: &str = ".workspace";
 pub const MANIFEST_FILE: &str = "manifest.toml";
 
 /// The state declaration file.
-#[allow(dead_code)] // Consumed by the state-parsing slice (Phase 2 / Slice C).
 pub const STATE_FILE: &str = "state.toml";
 
 /// The local (gitignored) subdirectory for per-developer state.

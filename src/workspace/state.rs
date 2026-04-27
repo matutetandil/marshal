@@ -7,14 +7,16 @@
 //! The state declaration is intent. It does not force reality; divergence
 //! between declared and actual state is normal and handled elsewhere.
 //!
-//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0.
-
-#![allow(dead_code)]
+//! Lit up in Phase 2 / Slice C. Consumed by the `ws` namespace to enrich
+//! `git ws` output with declared-state info; future slices (`ws status`,
+//! `ws diff`, `ws switch`) build on the same parsed structure.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+
+use crate::context::{STATE_FILE, WORKSPACE_MARKER};
 
 /// A parsed state declaration. In-memory representation of state.toml.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -47,12 +49,33 @@ impl StateDeclaration {
         Self::parse(&content)
     }
 
+    /// Try to load the state declaration from the standard location
+    /// relative to a workspace root: `<root>/.workspace/state.toml`.
+    ///
+    /// Returns:
+    /// * `Ok(None)` when the file does not exist — a workspace with
+    ///   no state declaration is fully valid (equivalent to "all
+    ///   repos on the manifest's default branch"). Callers that want
+    ///   the empty-default semantics can use [`load`] instead.
+    /// * `Ok(Some(state))` when the file is loaded and parsed cleanly.
+    /// * `Err(_)` when the file exists but is unreadable or malformed.
+    pub fn try_load_from_workspace(workspace_root: &Path) -> Result<Option<Self>> {
+        let path = workspace_root.join(WORKSPACE_MARKER).join(STATE_FILE);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read state declaration at {}", path.display()))?;
+        Self::parse(&content).map(Some)
+    }
+
     /// Parse a state declaration from a string.
     pub fn parse(content: &str) -> Result<Self> {
         toml::from_str(content).context("failed to parse state declaration TOML")
     }
 
     /// Serialize to TOML string for writing.
+    #[allow(dead_code)] // Consumed by `ws init` (Phase 2 / Slice D).
     pub fn to_toml(&self) -> Result<String> {
         toml::to_string_pretty(self).context("failed to serialize state declaration")
     }

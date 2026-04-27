@@ -1157,6 +1157,188 @@ fn ws_without_manifest_announces_the_gap() {
     );
 }
 
+/// Helper: write `state.toml` next to the manifest of an existing
+/// workspace. `make_workspace_with_manifest` returns a TempDir;
+/// this drops the state file alongside.
+fn write_state(workspace: &TempDir, toml: &str) {
+    std::fs::write(workspace.path().join(".workspace").join("state.toml"), toml).unwrap();
+}
+
+/// state.toml with a pinned repo: human form lists the pinned one
+/// individually; defaulted repos collapse into a count line.
+#[test]
+fn ws_state_pinned_repos_shown_others_collapsed() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    // 8 repos so abbreviation kicks in (>5 threshold).
+    let mut manifest = String::from("[workspace]\nname = \"demo\"\ndefault_branch = \"main\"\n\n");
+    for i in 0..8 {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"svc-{i}\"\nurl = \"git@example.com:svc-{i}.git\"\n\n"
+        ));
+    }
+    let ws = make_workspace_with_manifest(&manifest);
+    write_state(
+        &ws,
+        r#"
+        [repos."svc-0"]
+        branch = "feat/payment"
+
+        [repos."svc-3"]
+        branch = "feat/api-v2"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Pinned repos appear individually.
+    assert!(stdout.contains("svc-0"));
+    assert!(stdout.contains("on `feat/payment`"));
+    assert!(stdout.contains("svc-3"));
+    assert!(stdout.contains("on `feat/api-v2`"));
+    // Defaulted ones collapse into a count.
+    assert!(
+        stdout.contains("6 others default to manifest's default branch"),
+        "expected default-count line, got: {stdout}"
+    );
+    // Repos list also abbreviates (8 > 5).
+    assert!(
+        stdout.contains("Declared repos: 8"),
+        "expected count-only repos line for N>5, got: {stdout}"
+    );
+}
+
+/// `--all` expands both the repos list and the state declarations
+/// to show every entry, regardless of total.
+#[test]
+fn ws_all_flag_expands_repos_and_state() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let mut manifest = String::from("[workspace]\nname = \"demo\"\n\n");
+    for i in 0..8 {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"svc-{i}\"\nurl = \"git@example.com:svc-{i}.git\"\n\n"
+        ));
+    }
+    let ws = make_workspace_with_manifest(&manifest);
+    write_state(
+        &ws,
+        r#"[repos."svc-0"]
+branch = "feat/x"
+"#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "--all"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // With --all, the repos list expands inline (with names).
+    assert!(
+        stdout.contains("Declared repos (8):") && stdout.contains("svc-0"),
+        "expected expanded repos list, got: {stdout}"
+    );
+    // Every state entry shows up — even the defaulted ones.
+    for i in 0..8 {
+        assert!(
+            stdout.contains(&format!("svc-{i}")),
+            "svc-{i} should appear with --all, got: {stdout}"
+        );
+    }
+    assert!(
+        stdout.contains("default"),
+        "expected `default` markers in expanded view, got: {stdout}"
+    );
+    // No "X others" abbreviation under --all.
+    assert!(
+        !stdout.contains("others default"),
+        "abbreviation should be off under --all, got: {stdout}"
+    );
+}
+
+/// When every repo is on the default branch, the state line
+/// collapses to a single-line summary, regardless of count.
+#[test]
+fn ws_state_all_default_collapses_to_one_line() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    // No state.toml at all — every repo defaults implicitly.
+    let mut manifest = String::from("[workspace]\nname = \"demo\"\n\n");
+    for i in 0..3 {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"svc-{i}\"\nurl = \"git@example.com:svc-{i}.git\"\n\n"
+        ));
+    }
+    let ws = make_workspace_with_manifest(&manifest);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("State (implicit") && stdout.contains("all 3 repos on default"),
+        "expected implicit-default summary, got: {stdout}"
+    );
+}
+
+/// Inside a child repo declared in the manifest with a state pin,
+/// `current_repo.declared_branch` reflects the pin in JSON and the
+/// human form shows it.
+#[test]
+fn ws_current_repo_includes_declared_branch_when_state_pins_it() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "service-a"
+        url = "git@example.com:service-a.git"
+        "#,
+    );
+    write_state(
+        &ws,
+        r#"[repos."service-a"]
+branch = "feat/x"
+"#,
+    );
+    let inside = ws.path().join("src").join("service-a");
+    std::fs::create_dir_all(&inside).unwrap();
+
+    // JSON: declared_branch carries the pinned value.
+    let json = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&inside)
+        .args(["ws", "--json"])
+        .output()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(parsed["current_repo"]["declared_branch"], "feat/x");
+
+    // Human: line includes "state declares `feat/x`".
+    let human = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&inside)
+        .args(["ws"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        stdout.contains("state declares `feat/x`"),
+        "expected declared branch in current-repo line, got: {stdout}"
+    );
+}
+
 /// Outside any workspace, `git ws` exits non-zero with a helpful
 /// message on stderr — same shape as `marshal what-now` outside a
 /// repo, just for workspaces instead.
