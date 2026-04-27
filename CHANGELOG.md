@@ -6,12 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work in progress on `0.3.0` — completing Phase 1. Three chunks shipped
+Work in progress on `0.3.0` — completing Phase 1. Four chunks shipped
 so far: the actionable error hints architecture plus 13 of ~20 rules,
-and now `marshal what-now` — the proactive counterpart to hints. Still
-to come: context-aware `help`, JSON output modes, and (opportunistically)
+`marshal what-now`, and now JSON output across the marshal namespace
+on the back of a Strategy/Command refactor that locks Invariant 10
+into place. Still to come: context-aware `help` and (opportunistically)
 the remaining low-frequency hint rules. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- **Invariant 10 — Open/Closed via Strategy.** Promoted to `docs/PRINCIPLES.md` (`The Nine Invariants` → `The Ten Invariants`). Locks the de facto codebase pattern (Strategy + Registry across `modernize/`, `error_hints/`, `what_now/`, the config layer registry) as inviolable. CLAUDE.md reference updated.
+- **Command + Renderable substrate** in `cli.rs`. `Command` trait with `type Output: Renderable + Serialize` and `fn run(args) -> Result<Output>`; `Renderable` trait writing the human form to a `&mut dyn Write`; `OutputFormat` enum (Human / Json); `run_command` helper that the dispatcher invokes once a concrete `Command` is selected.
+- **Global `--json` flag** accepted anywhere in argv. The dispatcher strips it, sets the active `OutputFormat`, and threads the format into every subcommand. Concrete commands stay invariant — they never see `--json`. Adding a new marshal-namespace command lights up `--json` automatically.
+- New dependency: `serde_json = "1.0"`.
+
+### Changed
+
+- `commands::config` is now a directory with one file per operation (`get.rs`, `set.rs`, `unset.rs`, `list.rs`, `helpers.rs`, `mod.rs`). Each operation implements `Command`; each carries its own typed output (`GetOutput`, `SetOutput`, `UnsetOutput`, `ListOutput` + `ListEntry`). `set` and `unset` stay silent on success in the human form (matches pre-migration behaviour); both emit a structured payload in JSON.
+- `commands::what_now::run()` is replaced by a `WhatNow` `Command` impl. `Advice` gains `serde::Serialize` (derived) and an `impl Renderable for Advice` taking over what `Advice::render_to_stdout()` did. The previous "registry produced no advice" branch becomes an `anyhow::Error` (the catch-all `clean` rule guarantees this is unreachable).
+- `cli::dispatch` is the only place where `--json` is recognised and the output format is selected. Per Invariant 10, this is the only place that needs to change to add a cross-cutting output mode.
 
 ### Added
 

@@ -132,6 +132,40 @@ The advice picks the most-relevant rule for the situation; the chain runs from "
 
 State is read once via `git status --porcelain=v2 --branch` plus a few filesystem checks against `.git/` markers (`MERGE_HEAD`, `rebase-merge/`, `CHERRY_PICK_HEAD`, …). No human-readable git output is parsed.
 
+### JSON output (`--json`)
+
+Every command in the marshal namespace accepts a global `--json` flag (anywhere in argv) that switches stdout from the human form to a structured JSON payload. Made for scripting and tooling; the human form stays the default everywhere else.
+
+```
+$ git marshal config list --json
+{
+  "entries": [
+    { "key": "modernize.tips",          "value": "true"  },
+    { "key": "modernize.rewrite",       "value": "false" },
+    { "key": "errors.actionable_hints", "value": "true"  }
+  ]
+}
+
+$ git marshal what-now --json
+{
+  "rule_id": "clean",
+  "title": "Working tree clean, on `main` up to date with `origin/main`.",
+  "suggestions": [
+    "Start something new: `git switch -c feat/<name>`.",
+    "Or pull the latest: `git pull --rebase`."
+  ]
+}
+
+$ git marshal --json config get --show-origin modernize.tips
+{
+  "key": "modernize.tips",
+  "value": "true",
+  "origin": "default"
+}
+```
+
+The flag is position-independent (`marshal --json config list` and `marshal config list --json` both work) and only affects stdout — errors stay on stderr. Concrete commands never see `--json`; the dispatcher detects it once and routes the command's output type through `serde_json` instead of the human renderer. This shape is mandated by Invariant 10 ([`docs/PRINCIPLES.md`](docs/PRINCIPLES.md)): adding a new command is `impl Command` plus one registration line, and `--json` works for it automatically.
+
 ### Version line
 
 `git --version` identifies every tool in the chain, node+npm / php+xdebug style:

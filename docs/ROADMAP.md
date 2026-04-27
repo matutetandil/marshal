@@ -62,7 +62,12 @@ The product is built in phases, each self-contained and releasable. Each phase e
   markers, fed through a Strategy registry of 9 advice rules
   (priority-ordered: conflict → in-progress → initial → detached →
   uncommitted → diverged → behind → ahead → clean).
-- [ ] Output modes: human (colors, interactive) and machine (JSON, scripting)
+- [x] Output modes: human (colors, interactive) and machine (JSON, scripting) —
+  the JSON form shipped on `main` (mid-cycle, see CHANGELOG `[Unreleased]`).
+  Global `--json` flag in `cli::dispatch` switches every marshal-namespace
+  command's stdout. The Command + Renderable substrate makes adding a new
+  command light up `--json` automatically (Invariant 10). Colorised human
+  output remains a follow-up — currently the human form is plain text.
 
 ### Modernization Policy
 
