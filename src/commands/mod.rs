@@ -11,3 +11,4 @@ pub mod init;
 pub mod log;
 pub mod passthrough;
 pub mod status;
+pub mod what_now;
