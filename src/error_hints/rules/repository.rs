@@ -58,7 +58,10 @@ mod tests {
     fn does_not_match_unrelated_stderr() {
         let parsed = parse(&[]);
         assert!(NotAGitRepository
-            .examine(&ctx("fatal: pathspec 'foo' did not match any files\n", &parsed))
+            .examine(&ctx(
+                "fatal: pathspec 'foo' did not match any files\n",
+                &parsed
+            ))
             .is_none());
         assert!(NotAGitRepository.examine(&ctx("", &parsed)).is_none());
     }

@@ -80,7 +80,10 @@ mod tests {
         }
     }
 
-    fn ctx_for<'a>(stderr: &'a str, parsed: &'a crate::git::parser::ParsedGitInvocation) -> HintContext<'a> {
+    fn ctx_for<'a>(
+        stderr: &'a str,
+        parsed: &'a crate::git::parser::ParsedGitInvocation,
+    ) -> HintContext<'a> {
         HintContext {
             stderr,
             parsed,

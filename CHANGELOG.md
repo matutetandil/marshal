@@ -6,9 +6,68 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work begins on `0.3.0` — completing Phase 1: actionable error messages for
-common Git failures, context-aware `help`, the `what-now` command, and
-JSON output modes. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Work in progress on `0.3.0` — completing Phase 1. First chunk shipped:
+the architecture for actionable error hints plus six rules covering the
+most frequent high-friction Git failures. Still to come: more hint
+rules toward the planned ~20, context-aware `help`, the `what-now`
+command, and JSON output modes. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- **Actionable error hints.** When `git` exits non-zero and the captured
+  stderr matches a known failure shape, Marshal appends a short hint
+  to stderr below git's own message — a one-line title and a list of
+  concrete next steps. Hints fire only on git failures and never
+  modify git's own output.
+
+  Six rules in this slice:
+  - `not-a-git-repository` — points the user at `git init` (new project)
+    or `cd` (existing project).
+  - `dubious-ownership` — explains that git refuses for security and
+    surfaces both `safe.directory <path>` (per-repo) and
+    `safe.directory '*'` (less secure, all directories) options.
+  - `ssh-publickey-denied` — walks through `ssh-add -l`, host-side key
+    registration, and an `ssh -T` connectivity check.
+  - `push-non-fast-forward` — recommends `git pull --rebase && git push`
+    with `--force-with-lease` (never plain `--force`) as the deliberate
+    alternative. Gated on `parsed.subcommand == "push"` so the same
+    stderr substring captured from an unrelated wrapper does not trigger
+    the hint.
+  - `local-changes-would-be-overwritten` — fires on the canonical refusal
+    from `checkout`/`switch`/`pull`/`merge`/`rebase` when uncommitted
+    changes block the operation. Walks through stash, commit, and `git
+    restore` with the irreversibility called out.
+  - `unrelated-histories` — front-loads the "did you pick the wrong
+    branch?" check before mentioning `--allow-unrelated-histories`,
+    since the flag is rarely the right answer.
+- **`error_hints/` Strategy registry.** New module with the same shape
+  as `modernize/`: `ErrorHintRule` trait, `Registry`, a `Hint` value
+  type that renders to stderr in the canonical
+  `marshal: hint: <title>\n  • <action>` format. Adding a rule is one
+  trait impl plus one line in `register_defaults` — OCP respected.
+- **`errors.actionable_hints` config key** (default `true`). Setting it
+  to `false` restores byte-exact passthrough: stderr inheritance is
+  turned back on and the registry is not walked.
+- **Stderr capture mode in passthrough.** New `capture_stderr` argument
+  on `commands::passthrough::run_returning_outcome`. When `true`,
+  stderr is piped through a worker thread that forwards each chunk to
+  our stderr live (preserving streaming for clone/push/fetch progress)
+  and retains a copy in a 256 KiB-capped buffer for post-invocation
+  pattern matching. When `false` (used by inherit-only call sites and
+  by the opt-out path), the existing `Stdio::inherit()` path runs
+  unchanged.
+- **`Outcome::Ran` is now a struct variant** carrying both `status` and
+  the optional captured stderr buffer. Existing call sites that only
+  need the exit status (the `--version` augmentation) destructure with
+  `..` and are unaffected.
+
+### Changed
+
+- `main.rs` reads `errors.actionable_hints` once per invocation and
+  uses it to gate both the stderr capture mode and the registry walk.
+  When the run fails and a hint matches, the hint is emitted to
+  stderr after git's own output; on success or with the feature
+  disabled, behaviour is identical to `0.2.0`.
 
 ## [0.2.0] — 2026-04-24
 

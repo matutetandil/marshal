@@ -14,13 +14,13 @@ This tool proposes a different path: keep your repositories independent, but giv
 
 ## Status
 
-🚧 **Early development.** Currently on `0.2.0`: the first slice of Phase 1 lands on top of the `0.1.0` passthrough core. Marshal now speaks in its own voice (through the `marshal` subcommand namespace), emits modernization tips for deprecated Git forms, and has a three-tier configuration system mirroring Git's own `system < global < local` model. Any command Marshal does not intercept still passes through to `git` byte-for-byte. Workspace features arrive in later releases — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
+🚧 **Early development.** `0.2.0` is the latest tagged release. Work is in progress on `0.3.0` (closing out Phase 1) — the first six actionable error hints already landed on `main`. Marshal speaks in its own voice (through the `marshal` subcommand namespace), emits modernization tips for deprecated Git forms, has a three-tier configuration system mirroring Git's own `system < global < local` model, and appends actionable hints below git's own stderr when common commands fail. Any command Marshal does not intercept still passes through to `git`. Workspace features arrive in later releases — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Portability
 
 Marshal must compile and run wherever Git does: Windows, macOS, and Linux, on both x86_64 and ARM64. The passthrough implementation is portable by construction — it shells out to `git` via the OS `PATH` and inherits stdio directly, so there are no platform-specific assumptions embedded in the wrapper. CI validates every commit against this matrix (native tests on Linux x86_64/ARM64, macOS ARM64, Windows x86_64; cross-build for macOS x86_64).
 
-## Wrapper features (0.2.0)
+## Wrapper features
 
 When Marshal is aliased to `git`, almost every invocation passes through unchanged. A small number of behaviours sit on top.
 
@@ -64,6 +64,37 @@ git marshal config list
 | local    | `<git-dir>/marshal/config.toml`           | same (under the repo's `.git/`)       |
 
 Every path can be overridden by the corresponding env var (`MARSHAL_CONFIG`, `MARSHAL_SYSTEM_CONFIG`, `MARSHAL_LOCAL_CONFIG`). A malformed config file does not abort the command — Marshal warns once to stderr and falls back to defaults.
+
+### Actionable error hints
+
+When `git` exits non-zero with a recognised failure, Marshal appends a short hint to stderr below git's own message — a one-line title and a list of concrete next steps:
+
+```
+$ git status                              # outside any repository
+fatal: not a git repository (or any of the parent directories): .git
+marshal: hint: this directory is not inside a Git repository.
+  • If this is a new project, run `git init` to start one here.
+  • If you meant to work in an existing repo, `cd` into it first.
+```
+
+Six rules ship today, covering some of the highest-friction Git failures:
+
+| Rule                                  | Fires on                                                 |
+|---------------------------------------|-----------------------------------------------------------|
+| `not-a-git-repository`                | `fatal: not a git repository …`                          |
+| `dubious-ownership`                   | `detected dubious ownership in repository at …`          |
+| `ssh-publickey-denied`                | `Permission denied (publickey)` from a Git SSH remote    |
+| `push-non-fast-forward`               | `git push` rejected because the remote moved ahead       |
+| `local-changes-would-be-overwritten`  | `checkout`/`switch`/`pull`/`merge`/`rebase` blocked by uncommitted changes |
+| `unrelated-histories`                 | `refusing to merge unrelated histories`                  |
+
+Hints fire only on git failures (exit ≠ 0) and never modify git's own output. Disable with:
+
+```
+git marshal config set errors.actionable_hints false
+```
+
+Disabling restores byte-exact passthrough — stderr inheritance is turned back on so even Marshal's stderr capture goes away.
 
 ### Version line
 

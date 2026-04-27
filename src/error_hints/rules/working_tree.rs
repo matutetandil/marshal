@@ -48,7 +48,8 @@ mod tests {
 
     #[test]
     fn matches_checkout_refusal() {
-        let stderr = "error: Your local changes to the following files would be overwritten by checkout:\n\
+        let stderr =
+            "error: Your local changes to the following files would be overwritten by checkout:\n\
                       \tsrc/main.rs\n\
                       Please commit your changes or stash them before you switch branches.\n";
         let parsed = parse(&[]);

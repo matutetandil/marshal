@@ -16,9 +16,8 @@ impl ErrorHintRule for DubiousOwnership {
         }
         Some(Hint {
             rule_id: "dubious-ownership",
-            title:
-                "Git refused to use this repository because it is owned by a different user."
-                    .to_string(),
+            title: "Git refused to use this repository because it is owned by a different user."
+                .to_string(),
             actions: vec![
                 "Trust this exact repo: run the `git config --global --add safe.directory …` \
                  command git showed above."

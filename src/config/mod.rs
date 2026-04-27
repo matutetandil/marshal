@@ -145,9 +145,7 @@ impl Config {
         match key {
             ConfigKey::ModernizeTips => self.modernize.tips.map(|b| b.to_string()),
             ConfigKey::ModernizeRewrite => self.modernize.rewrite.map(|b| b.to_string()),
-            ConfigKey::ErrorsActionableHints => {
-                self.errors.actionable_hints.map(|b| b.to_string())
-            }
+            ConfigKey::ErrorsActionableHints => self.errors.actionable_hints.map(|b| b.to_string()),
         }
     }
 }
@@ -473,10 +471,7 @@ mod tests {
             .unwrap();
         assert!(!cfg.actionable_hints());
         cfg.unset(ConfigKey::ErrorsActionableHints);
-        assert!(
-            cfg.actionable_hints(),
-            "fall back to default after unset"
-        );
+        assert!(cfg.actionable_hints(), "fall back to default after unset");
     }
 
     #[test]
