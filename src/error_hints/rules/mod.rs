@@ -4,11 +4,13 @@
 //! "another repository-state hint" lands next to its siblings. Each
 //! file contains one or more rules and their unit tests.
 //!
-//! Current coverage (11 of the planned ~20 hints):
+//! Current coverage (13 of the planned ~20 hints):
 //!
 //! * **repository.rs** — `not a git repository`.
 //! * **ownership.rs** — `detected dubious ownership`.
 //! * **ssh.rs** — `Permission denied (publickey)`.
+//! * **auth.rs** — HTTPS authentication failure.
+//! * **network.rs** — `Could not resolve host` (DNS).
 //! * **push.rs** — three push-lifecycle hints: non-fast-forward
 //!   rejection, missing upstream on first push, src refspec
 //!   doesn't match anything local.
@@ -20,7 +22,9 @@
 
 use super::Registry;
 
+mod auth;
 mod merge;
+mod network;
 mod ownership;
 mod pathspec;
 mod push;
@@ -39,6 +43,8 @@ pub fn register_defaults(registry: &mut Registry) {
     registry.register(Box::new(repository::NotAGitRepository));
     registry.register(Box::new(ownership::DubiousOwnership));
     registry.register(Box::new(ssh::PublicKeyDenied));
+    registry.register(Box::new(auth::HttpsAuthFailed));
+    registry.register(Box::new(network::HostResolutionFailed));
     registry.register(Box::new(push::PushNonFastForward));
     registry.register(Box::new(push::UpstreamNotConfigured));
     registry.register(Box::new(push::SrcRefspecNoMatch));
