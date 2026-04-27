@@ -6,7 +6,7 @@
 //! waiting on the user to either finish the operation or abort it.
 
 use crate::commands::what_now::rule::{Advice, AdviceRule};
-use crate::commands::what_now::state::{InProgressOp, RepoState};
+use crate::git::porcelain::{InProgressOp, RepoState};
 
 pub struct InProgressOperation;
 
@@ -77,7 +77,7 @@ impl AdviceRule for InProgressOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::what_now::state::WorkingTreeInfo;
+    use crate::git::porcelain::WorkingTreeInfo;
 
     fn state_for(op: InProgressOp) -> RepoState {
         RepoState {

@@ -1,7 +1,7 @@
 //! Unresolved merge conflicts — highest-priority advice.
 
 use crate::commands::what_now::rule::{Advice, AdviceRule};
-use crate::commands::what_now::state::{InProgressOp, RepoState};
+use crate::git::porcelain::{InProgressOp, RepoState};
 
 /// Anything else marshal might suggest is moot until conflicts are
 /// resolved — `git commit` and `git switch` will refuse, every push
@@ -53,7 +53,7 @@ impl AdviceRule for MergeConflict {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::what_now::state::WorkingTreeInfo;
+    use crate::git::porcelain::WorkingTreeInfo;
 
     fn state_with_unmerged(n: usize, op: InProgressOp) -> RepoState {
         RepoState {

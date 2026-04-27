@@ -1,24 +1,29 @@
-//! Capture a snapshot of the repository's current state.
+//! Capture a snapshot of a git repository's current state.
 //!
-//! [`RepoState`] is the input every advice rule sees. It is built once
-//! per `marshal what-now` invocation by combining two cheap shellouts —
-//! `git rev-parse --git-dir` and `git status --porcelain=v2 --branch` —
-//! with a handful of filesystem checks against `.git/` markers for
-//! ongoing operations git can't surface in porcelain v2 (merge,
-//! rebase, cherry-pick, revert, bisect).
+//! Shared substrate. The `marshal what-now` command reads it from
+//! the cwd; the `ws status` command reads it from each child repo
+//! by path. Both go through this module so the parser, the data
+//! types, and the in-progress detection have a single source of
+//! truth.
+//!
+//! [`RepoState::detect`] reads the cwd's repository (the original
+//! caller from `what-now`); [`RepoState::detect_at`] takes an
+//! explicit path (the new entry point for `ws status` once it
+//! ships).
 //!
 //! Stable signals only: porcelain v2 is git's documented machine-
 //! readable format, expressly intended to survive across releases.
-//! Filesystem markers (`MERGE_HEAD`, `rebase-merge/`, `CHERRY_PICK_HEAD`,
-//! `REVERT_HEAD`, `BISECT_LOG`) are git internals but have been stable
-//! for a decade — well below the change-rate of git's user-facing
-//! output. We never parse human-readable `git status`.
+//! Filesystem markers (`MERGE_HEAD`, `rebase-merge/`,
+//! `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `BISECT_LOG`) are git
+//! internals but have been stable for a decade — well below the
+//! change-rate of git's user-facing output. We never parse
+//! human-readable `git status`.
 
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// One-shot snapshot of the repository.
+/// One-shot snapshot of a repository.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RepoState {
     pub branch: BranchInfo,
@@ -44,8 +49,8 @@ pub struct BranchInfo {
 }
 
 /// Working tree + index counters. We aggregate counts (rather than
-/// keep file lists) because every advice rule decides on counts; if a
-/// rule ever needs the names, we'll add a `paths` field then.
+/// keep file lists) because every consumer decides on counts; if a
+/// future consumer needs the names, we'll add a `paths` field then.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WorkingTreeInfo {
     /// Files with non-`.` in the **index** column (changes ready to
@@ -94,20 +99,31 @@ impl InProgressOp {
 }
 
 impl RepoState {
-    /// Detect the current state. Errors when the cwd is not inside a
-    /// git repository (the `git rev-parse --git-dir` shellout fails).
+    /// Detect the state of the repo containing the current working
+    /// directory. Errors when the cwd is not inside a git repository
+    /// (the `git rev-parse --git-dir` shellout fails).
     pub fn detect() -> Result<Self> {
-        let git_dir = git_dir_via_rev_parse()
+        let cwd = std::env::current_dir().context("failed to read current directory")?;
+        Self::detect_at(&cwd)
+    }
+
+    /// Detect the state of the repository at `path`. Used when the
+    /// caller iterates over many repos (`ws status`) — `path` is
+    /// passed via `git -C <path> …` so the caller's cwd is
+    /// untouched.
+    pub fn detect_at(path: &Path) -> Result<Self> {
+        let git_dir = git_dir_at(path)
             .context("not in a git repository (or any parent up to the filesystem root)")?;
-        let porcelain = run_status_porcelain_v2()?;
+        let porcelain = run_status_porcelain_v2_at(path)?;
         let mut state = parse_porcelain_v2(&porcelain);
         state.in_progress = detect_in_progress(&git_dir);
         Ok(state)
     }
 }
 
-fn git_dir_via_rev_parse() -> Result<PathBuf> {
+fn git_dir_at(repo: &Path) -> Result<PathBuf> {
     let output = Command::new("git")
+        .current_dir(repo)
         .args(["rev-parse", "--git-dir"])
         .output()
         .context("failed to invoke `git rev-parse --git-dir`")?;
@@ -119,11 +135,21 @@ fn git_dir_via_rev_parse() -> Result<PathBuf> {
         );
     }
     let raw = String::from_utf8_lossy(&output.stdout);
-    Ok(PathBuf::from(raw.trim()))
+    let p = PathBuf::from(raw.trim());
+    // `git rev-parse --git-dir` returns a path relative to the
+    // command's cwd when the .git dir is below it; resolve to an
+    // absolute path against `repo` so filesystem-marker checks find
+    // the right files.
+    if p.is_absolute() {
+        Ok(p)
+    } else {
+        Ok(repo.join(p))
+    }
 }
 
-fn run_status_porcelain_v2() -> Result<String> {
+fn run_status_porcelain_v2_at(repo: &Path) -> Result<String> {
     let output = Command::new("git")
+        .current_dir(repo)
         .args(["status", "--porcelain=v2", "--branch"])
         .output()
         .context("failed to invoke `git status --porcelain=v2 --branch`")?;
@@ -151,7 +177,7 @@ fn run_status_porcelain_v2() -> Result<String> {
 ///   * `u <XY> …`  — unmerged (conflict)
 ///   * `? <path>`  — untracked
 ///   * `! <path>`  — ignored (we skip these)
-fn parse_porcelain_v2(text: &str) -> RepoState {
+pub fn parse_porcelain_v2(text: &str) -> RepoState {
     let mut state = RepoState::default();
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
@@ -202,12 +228,12 @@ fn parse_porcelain_v2(text: &str) -> RepoState {
             state.working_tree.untracked += 1;
         }
         // `! ` (ignored) lines are deliberately skipped — they don't
-        // surface in any advice rule.
+        // surface in any consumer.
     }
     state
 }
 
-fn detect_in_progress(git_dir: &Path) -> InProgressOp {
+pub fn detect_in_progress(git_dir: &Path) -> InProgressOp {
     // Order matters: rebase carries a MERGE_HEAD too, so check rebase
     // first to avoid mis-classifying it as a plain merge.
     if git_dir.join("rebase-merge").is_dir() || git_dir.join("rebase-apply").is_dir() {

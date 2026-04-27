@@ -7,17 +7,14 @@
 //! tree counters, ongoing multi-step operations) and recommends a
 //! concrete next step the user can take.
 //!
-//! The module ships incrementally:
-//!
-//!   * step W1 — `state.rs`: the [`state::RepoState`] snapshot.
-//!   * step W2 — `rule.rs` + `Registry`: Strategy plumbing (this commit).
-//!   * step W3 — `rules/`: the canonical rules (merge-conflict,
-//!     uncommitted-changes, unpushed-commits, …).
-//!   * step W4 — `cli.rs` wiring: `marshal what-now` reachable end-to-end.
+//! State extraction lives in [`crate::git::porcelain`] (shared with
+//! `ws status` from Phase 2 / Slice E). This module orchestrates:
+//! a state snapshot of the cwd, the canonical rule registry, and
+//! the resulting advice.
 //!
 //! SOLID applied (mirrors `error_hints/` and `modernize/`):
 //! * **SRP** — one rule per situation; the registry aggregates;
-//!   `state.rs` extracts state; `rule.rs` defines the contract.
+//!   `git::porcelain` extracts state; `rule.rs` defines the contract.
 //! * **OCP** — adding rule N+1 is `impl AdviceRule` + one line in
 //!   `register_defaults`. No existing code changes.
 //! * **DIP** — the entry point depends on the registry trait, never
@@ -25,7 +22,6 @@
 
 pub mod rule;
 pub mod rules;
-pub mod state;
 
 pub use rule::{Advice, AdviceRule};
 
@@ -51,7 +47,7 @@ impl Command for WhatNow {
     type Output = Advice;
 
     fn run(&self, _args: &[OsString]) -> Result<Self::Output> {
-        let state = state::RepoState::detect()?;
+        let state = crate::git::porcelain::RepoState::detect()?;
         let registry = Registry::default();
         registry
             .first_advice(&state)
@@ -78,7 +74,7 @@ impl Registry {
     /// matching advice. `None` only when the registry is empty —
     /// the canonical set will include a `clean` fallback so this
     /// returns `Some` for every real state.
-    pub fn first_advice(&self, state: &state::RepoState) -> Option<Advice> {
+    pub fn first_advice(&self, state: &crate::git::porcelain::RepoState) -> Option<Advice> {
         self.rules.iter().find_map(|r| r.examine(state))
     }
 }
@@ -95,8 +91,8 @@ impl Default for Registry {
 
 #[cfg(test)]
 mod tests {
-    use super::state::RepoState;
     use super::*;
+    use crate::git::porcelain::RepoState;
 
     // Test doubles so we can exercise the registry plumbing without
     // depending on the production rules (which arrive in W3).
@@ -130,7 +126,7 @@ mod tests {
         // chain. Per-rule matching is covered by each rule module's
         // own tests; this asserts dispatch reaches them and the
         // priority order is respected.
-        use super::state::{BranchInfo, InProgressOp, WorkingTreeInfo};
+        use crate::git::porcelain::{BranchInfo, InProgressOp, WorkingTreeInfo};
         let reg = Registry::default();
 
         // Conflicts win even when other conditions also apply.

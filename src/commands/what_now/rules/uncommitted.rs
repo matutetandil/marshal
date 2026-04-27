@@ -7,7 +7,7 @@
 //! later".
 
 use crate::commands::what_now::rule::{Advice, AdviceRule};
-use crate::commands::what_now::state::RepoState;
+use crate::git::porcelain::RepoState;
 
 pub struct UncommittedChanges;
 
@@ -90,7 +90,7 @@ fn build_title(staged: usize, unstaged: usize, untracked: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::what_now::state::WorkingTreeInfo;
+    use crate::git::porcelain::WorkingTreeInfo;
 
     fn state_with(staged: usize, unstaged: usize, untracked: usize) -> RepoState {
         RepoState {

@@ -8,6 +8,7 @@
 // designed to allow that swap without leaking implementation details.
 
 pub mod parser;
+pub mod porcelain;
 
 use anyhow::{bail, Context, Result};
 use std::path::Path;

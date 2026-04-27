@@ -6,7 +6,7 @@
 //! the chain just before the `clean` fallback.
 
 use crate::commands::what_now::rule::{Advice, AdviceRule};
-use crate::commands::what_now::state::RepoState;
+use crate::git::porcelain::RepoState;
 
 /// Both ahead and behind — local commits exist that the remote does
 /// not, and the remote has commits the local branch does not. Sync
@@ -123,7 +123,7 @@ fn upstream_label(state: &RepoState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::what_now::state::{BranchInfo, WorkingTreeInfo};
+    use crate::git::porcelain::{BranchInfo, WorkingTreeInfo};
 
     fn clean_state(ahead: usize, behind: usize, upstream: Option<&str>) -> RepoState {
         RepoState {

@@ -3,7 +3,7 @@
 //! lose their position by switching branches.
 
 use crate::commands::what_now::rule::{Advice, AdviceRule};
-use crate::commands::what_now::state::RepoState;
+use crate::git::porcelain::RepoState;
 
 /// `git init` happened, the user has files, but no commits yet. Even
 /// if the working tree is "dirty" (untracked files), the right
@@ -57,7 +57,7 @@ impl AdviceRule for DetachedHead {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::what_now::state::BranchInfo;
+    use crate::git::porcelain::BranchInfo;
 
     #[test]
     fn initial_state_fires_only_when_is_initial() {

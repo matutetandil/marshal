@@ -15,7 +15,7 @@ use crate::cli::Renderable;
 use serde::Serialize;
 use std::io::{self, Write};
 
-use super::state::RepoState;
+use crate::git::porcelain::RepoState;
 
 /// Strategy: examine the current repo state and decide whether to
 /// emit an advice.

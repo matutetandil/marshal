@@ -4,7 +4,7 @@
 //! earlier rule fires, this one is skipped.
 
 use crate::commands::what_now::rule::{Advice, AdviceRule};
-use crate::commands::what_now::state::RepoState;
+use crate::git::porcelain::RepoState;
 
 pub struct Clean;
 
@@ -36,7 +36,7 @@ impl AdviceRule for Clean {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::what_now::state::BranchInfo;
+    use crate::git::porcelain::BranchInfo;
 
     #[test]
     fn always_fires_with_appropriate_title() {
