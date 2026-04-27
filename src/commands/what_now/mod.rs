@@ -97,13 +97,62 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_starts_empty_until_rules_ship() {
-        // Guards that `register_defaults` does not silently start
-        // returning advice before rule modules land. When the first
-        // rules arrive, this test is rewritten to assert specific
-        // rule_ids fire.
+    fn default_registry_dispatches_through_canonical_rules() {
+        // Smoke-test that `register_defaults` wired the canonical
+        // chain. Per-rule matching is covered by each rule module's
+        // own tests; this asserts dispatch reaches them and the
+        // priority order is respected.
+        use super::state::{BranchInfo, InProgressOp, WorkingTreeInfo};
         let reg = Registry::default();
-        assert!(reg.first_advice(&RepoState::default()).is_none());
+
+        // Conflicts win even when other conditions also apply.
+        let s = RepoState {
+            working_tree: WorkingTreeInfo {
+                unmerged: 1,
+                unstaged: 1,
+                ..Default::default()
+            },
+            in_progress: InProgressOp::Rebase,
+            ..Default::default()
+        };
+        assert_eq!(reg.first_advice(&s).unwrap().rule_id, "merge-conflict");
+
+        // In-progress beats uncommitted-changes when no conflicts.
+        let s = RepoState {
+            working_tree: WorkingTreeInfo {
+                unstaged: 1,
+                ..Default::default()
+            },
+            in_progress: InProgressOp::Rebase,
+            ..Default::default()
+        };
+        assert_eq!(reg.first_advice(&s).unwrap().rule_id, "rebase-in-progress");
+
+        // Initial wins over uncommitted (untracked files in fresh repo).
+        let s = RepoState {
+            branch: BranchInfo {
+                is_initial: true,
+                name: Some("main".to_string()),
+                ..Default::default()
+            },
+            working_tree: WorkingTreeInfo {
+                untracked: 3,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(reg.first_advice(&s).unwrap().rule_id, "initial-state");
+
+        // Clean repo gets the catch-all.
+        let s = RepoState {
+            branch: BranchInfo {
+                name: Some("main".to_string()),
+                upstream: Some("origin/main".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(reg.first_advice(&s).unwrap().rule_id, "clean");
     }
 
     #[test]
