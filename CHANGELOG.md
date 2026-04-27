@@ -6,14 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work in progress on `0.3.0` — completing Phase 1. Five chunks shipped
-so far: the actionable error hints architecture plus 13 of ~20 rules,
-`marshal what-now`, JSON output across the marshal namespace via the
-Strategy/Command refactor that locks Invariant 10 into place, and now
-`marshal help` — context-aware overview plus four reference topics.
-Remaining for the milestone: opportunistically the low-frequency hint
-rules and (deferred) human-output colourisation. See
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+Phase 1 closed with `0.3.0`. Next milestone is Phase 2 / `0.4.0` —
+read-only workspace operations: context detection (walk the
+filesystem looking for `.workspace/`), `ws init`, manifest +
+state.toml parsing, `ws status`, `ws log`, `ws diff`, scope
+inference, the `--explain` flag. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## [0.3.0] — 2026-04-27
+
+Phase 1 complete. Marshal grew from a passthrough wrapper that emits
+modernization tips into a tool with its own voice across stderr
+(reactive hints) and stdout (proactive advice and help), backed by a
+Strategy/Command substrate that makes adding a subcommand or output
+mode mechanical. Five major capabilities shipped, all reachable
+through `git marshal <…>` when aliased.
 
 ### Added
 
@@ -216,6 +222,37 @@ rules and (deferred) human-output colourisation. See
   stderr after git's own output; on success or with the feature
   disabled, behaviour is identical to `0.2.0`.
 
+### Architecture
+
+- **Invariant 10 (Open/Closed via Strategy)** added to
+  `docs/PRINCIPLES.md`. The Nine Invariants become the Ten Invariants;
+  CLAUDE.md is updated. Locks the de facto codebase pattern (Strategy
+  + Registry across `modernize/`, `error_hints/`, `what_now/`,
+  `commands/help/`, the `ConfigSource` registry) as inviolable. The
+  Command + Renderable substrate, the `--json` flag, and `marshal
+  help` were all designed and shipped under this invariant.
+
+### Release notes
+
+- Phase 1 shipped end-to-end across `0.2.0` and `0.3.0`. The 0.3.0
+  cycle covered: 13 actionable error hints (still ~7 short of the
+  planned ~20, but covering the high-friction failures —
+  `not-a-git-repository`, `dubious-ownership`, `empty-ident`,
+  SSH publickey + HTTPS auth + DNS resolution, three push-lifecycle
+  rules, pathspec + ambiguous-argument, working-tree refusal,
+  unrelated-histories merge), `marshal what-now`, the
+  Strategy/Command refactor, global `--json`, and `marshal help`.
+- Tagged on `main` as `v0.3.0`. Not published to crates.io in this
+  release; publication will be automated from a future GitHub Actions
+  workflow. Until then, install from source: `cargo install --git
+  https://github.com/matutetandil/marshal --tag v0.3.0`.
+- Test count at 0.3.0: 228 unit + 42 integration = 270 (up from 137
+  at 0.2.0).
+- The remaining low-frequency hint rules (cannot lock ref,
+  branch -D not fully merged, dubious permissions on `~/.ssh`,
+  bad revision, …) and human-output colourisation are deferred to
+  future cycles — they no longer block Phase 1.
+
 ## [0.2.0] — 2026-04-24
 
 First slice of Phase 1 shipped. Marshal is no longer a pure passthrough —
@@ -403,7 +440,8 @@ Published from branch `release/0.0.0-reserved` and tagged `v0.0.0-reserved`.
 Not merged to `main` by design — the branch is an isolated one-off publish,
 while `main` continues with the Phase 0 scaffold.
 
-[Unreleased]: https://github.com/matutetandil/marshal/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/matutetandil/marshal/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/matutetandil/marshal/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/matutetandil/marshal/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/matutetandil/marshal/compare/v0.0.0-reserved...v0.1.0
 [0.0.0-reserved]: https://github.com/matutetandil/marshal/releases/tag/v0.0.0-reserved

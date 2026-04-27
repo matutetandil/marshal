@@ -21,7 +21,7 @@ The product is built in phases, each self-contained and releasable. Each phase e
 
 **Deliverable:** a binary that can be aliased to `git` and forwards every invocation transparently. No workspace awareness yet — context detection is deferred to Phase 2, where it is actually consumed.
 
-## Phase 1: Wrapper — UX Improvements over Git — 🟡 first slice shipped as `0.2.0` (2026-04-24)
+## Phase 1: Wrapper — UX Improvements over Git — ✅ shipped as `0.2.0` + `0.3.0` (2026-04-24 / 2026-04-27)
 
 **Goal:** useful wrapper for plain Git repos. Pure value-add, no workspace logic required.
 
@@ -41,39 +41,34 @@ The product is built in phases, each self-contained and releasable. Each phase e
   `PRINCIPLES.md` rule "don't improve Git in passthrough" limits what we
   can do before workspace context arrives (Phase 2). Revisit once workspace
   mode provides a natural scope for the augmentation.
-- [~] Actionable error messages for common Git errors (top 20). 13 rules
-  and the `error_hints/` Strategy registry shipped on `main` (mid-cycle,
-  see CHANGELOG `[Unreleased]`), covering most of the high-friction
-  failures a real user hits: `not-a-git-repository`, `dubious-ownership`,
-  `empty-ident`, `ssh-publickey-denied`, `https-auth-failed`,
-  `host-resolution-failed`, `push-non-fast-forward`,
-  `upstream-not-configured`, `src-refspec-no-match`, `pathspec-no-match`,
-  `ambiguous-argument`, `local-changes-would-be-overwritten`,
-  `unrelated-histories`. Stderr capture mode landed in
-  `commands::passthrough` to support the registry; opt-out via
-  `errors.actionable_hints = false` restores byte-exact passthrough.
-  Remaining ~7 rules cover progressively rarer failures (cannot lock
-  ref, branch -D not fully merged, dubious permissions on `~/.ssh`, …)
-  and will land opportunistically.
-- [x] `help` command with context-awareness — shipped on `main`
-  (mid-cycle, see CHANGELOG `[Unreleased]`). `marshal help` (no arg)
-  prints a context-aware overview that adapts based on whether the
-  cwd is inside a git repository (recommends `what-now` / `git status`)
-  or outside one (recommends `git init` / `cd`). Five topics
-  (`overview`, `config`, `hints`, `modernize`, `what-now`). `--json`
-  works for free thanks to the Command/Renderable substrate.
-- [x] `what-now` command that analyzes current state and suggests next actions —
-  shipped on `main` (mid-cycle, see CHANGELOG `[Unreleased]`). State
-  read via `git status --porcelain=v2 --branch` + `.git/*` filesystem
-  markers, fed through a Strategy registry of 9 advice rules
-  (priority-ordered: conflict → in-progress → initial → detached →
-  uncommitted → diverged → behind → ahead → clean).
-- [x] Output modes: human (colors, interactive) and machine (JSON, scripting) —
-  the JSON form shipped on `main` (mid-cycle, see CHANGELOG `[Unreleased]`).
-  Global `--json` flag in `cli::dispatch` switches every marshal-namespace
-  command's stdout. The Command + Renderable substrate makes adding a new
-  command light up `--json` automatically (Invariant 10). Colorised human
-  output remains a follow-up — currently the human form is plain text.
+- [x] Actionable error messages for common Git errors — 13 rules shipped
+  in `0.3.0` covering the high-friction failures
+  (`not-a-git-repository`, `dubious-ownership`, `empty-ident`,
+  `ssh-publickey-denied`, `https-auth-failed`, `host-resolution-failed`,
+  `push-non-fast-forward`, `upstream-not-configured`,
+  `src-refspec-no-match`, `pathspec-no-match`, `ambiguous-argument`,
+  `local-changes-would-be-overwritten`, `unrelated-histories`).
+  Stderr capture mode in `commands::passthrough` is gated by
+  `errors.actionable_hints` (default on; off restores byte-exact
+  passthrough). The remaining ~7 low-frequency rules (cannot lock ref,
+  branch -D not fully merged, dubious permissions on `~/.ssh`, …) are
+  deferred to opportunistic future cycles.
+- [x] `help` command with context-awareness — `marshal help` lands on
+  a context-aware overview (in-repo recommends `what-now`/`git status`;
+  outside recommends `git init`/`cd`). Five topics ship: `overview`,
+  `config`, `hints`, `modernize`, `what-now`. `--json` works
+  automatically via the Command/Renderable substrate. *(0.3.0)*
+- [x] `what-now` command — proactive counterpart to actionable error
+  hints. State read via `git status --porcelain=v2 --branch` plus
+  `.git/*` filesystem markers, fed through a Strategy registry of 9
+  advice rules priority-ordered: conflict → in-progress → initial →
+  detached → uncommitted → diverged → behind → ahead → clean. *(0.3.0)*
+- [x] Output modes: human (default) and JSON — global `--json` flag
+  in `cli::dispatch` switches every marshal-namespace command's
+  stdout. The Command + Renderable substrate makes adding a new
+  command light up `--json` automatically (Invariant 10). Colourised
+  human output remains a follow-up — currently the human form is
+  plain text. *(0.3.0)*
 
 ### Modernization Policy
 
