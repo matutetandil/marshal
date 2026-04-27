@@ -7,14 +7,16 @@
 //! Changes to the manifest should be rare and deliberate, going through normal
 //! Git review workflows.
 //!
-//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0.
-
-#![allow(dead_code)]
+//! Lit up in Phase 2 / Slice B. The `ws` namespace consumes
+//! [`Manifest::try_load_from_workspace`] to enrich the bare `git ws` output;
+//! `ws init` (Slice D) and `ws status` (Slice E) consume the rest.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+
+use crate::context::{MANIFEST_FILE, WORKSPACE_MARKER};
 
 /// A parsed manifest. This is the in-memory representation of manifest.toml.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -72,6 +74,24 @@ impl Manifest {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read manifest at {}", path.display()))?;
         Self::parse(&content)
+    }
+
+    /// Try to load the manifest from the standard location relative
+    /// to a workspace root: `<root>/.workspace/manifest.toml`.
+    ///
+    /// Returns:
+    /// * `Ok(None)` when the file does not exist — a workspace can be
+    ///   partially initialised (e.g. `mkdir .workspace` without a
+    ///   manifest yet, or right after a not-quite-finished `ws init`),
+    ///   and that should not crash callers.
+    /// * `Ok(Some(manifest))` when the file is loaded and valid.
+    /// * `Err(_)` when the file exists but is unreadable or malformed.
+    pub fn try_load_from_workspace(workspace_root: &Path) -> Result<Option<Self>> {
+        let path = workspace_root.join(WORKSPACE_MARKER).join(MANIFEST_FILE);
+        if !path.exists() {
+            return Ok(None);
+        }
+        Self::load(&path).map(Some)
     }
 
     /// Parse a manifest from a string.

@@ -968,8 +968,8 @@ fn ws_inside_child_repo_reports_repo_name_by_convention() {
     );
 }
 
-/// `--json` emits `{root, current_repo}`. `current_repo` is omitted
-/// when at the workspace root (Option::is_none, skip_serializing_if).
+/// `--json` emits `{root, current_repo?, manifest?}`. `current_repo`
+/// and `manifest` are both `Option`s with `skip_serializing_if`.
 #[test]
 fn ws_json_includes_current_repo_only_when_inside_one() {
     let cfg_dir = TempDir::new().unwrap();
@@ -992,7 +992,8 @@ fn ws_json_includes_current_repo_only_when_inside_one() {
         "current_repo should be absent at the workspace root, got: {parsed}"
     );
 
-    // Inside a child repo: current_repo present and named.
+    // Inside a child repo (no manifest): current_repo is an object
+    // with `name` and `declared = false` (no manifest to declare in).
     let inside = marshal_with_isolated_config(&cfg_path)
         .current_dir(&child)
         .args(["ws", "--json"])
@@ -1000,7 +1001,160 @@ fn ws_json_includes_current_repo_only_when_inside_one() {
         .unwrap();
     assert!(inside.status.success());
     let parsed: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
-    assert_eq!(parsed["current_repo"], "svc-x");
+    assert_eq!(parsed["current_repo"]["name"], "svc-x");
+    assert_eq!(parsed["current_repo"]["declared"], false);
+    assert!(
+        parsed.get("manifest").is_none(),
+        "manifest should be absent when manifest.toml does not exist"
+    );
+}
+
+/// Helper: create a workspace with a populated manifest at
+/// `<root>/.workspace/manifest.toml`.
+fn make_workspace_with_manifest(toml: &str) -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let ws = tmp.path().join(".workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::write(ws.join("manifest.toml"), toml).unwrap();
+    tmp
+}
+
+/// With a valid manifest in place, `git ws` includes the workspace
+/// name, default branch, and declared repo list in the human form,
+/// plus the structured manifest summary in the JSON form.
+#[test]
+fn ws_with_valid_manifest_reports_workspace_name_and_repos() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "my-project"
+        default_branch = "develop"
+
+        [[repos]]
+        name = "service-a"
+        url = "git@github.com:org/service-a.git"
+
+        [[repos]]
+        name = "shared-lib"
+        url = "git@github.com:org/shared-lib.git"
+        "#,
+    );
+
+    // Human form.
+    let human = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws"])
+        .output()
+        .unwrap();
+    assert!(human.status.success());
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(stdout.contains("Workspace name: my-project"));
+    assert!(stdout.contains("default branch: develop"));
+    assert!(stdout.contains("Declared repos (2): service-a, shared-lib"));
+
+    // JSON form.
+    let json = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "--json"])
+        .output()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(parsed["manifest"]["name"], "my-project");
+    assert_eq!(parsed["manifest"]["default_branch"], "develop");
+    let repos = parsed["manifest"]["repos"].as_array().unwrap();
+    assert_eq!(repos.len(), 2);
+    assert_eq!(repos[0], "service-a");
+    assert_eq!(repos[1], "shared-lib");
+}
+
+/// `current_repo.declared = true` when the manifest declares the
+/// repo (matched by name); `false` otherwise. The convention-based
+/// path detection still finds the candidate; the manifest decides
+/// whether it counts.
+#[test]
+fn ws_current_repo_reconciles_against_manifest() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "my-project"
+
+        [[repos]]
+        name = "declared-svc"
+        url = "git@example.com:declared-svc.git"
+        "#,
+    );
+
+    // Inside the declared repo.
+    let declared_path = ws.path().join("src").join("declared-svc");
+    std::fs::create_dir_all(&declared_path).unwrap();
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&declared_path)
+        .args(["ws", "--json"])
+        .output()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["current_repo"]["name"], "declared-svc");
+    assert_eq!(parsed["current_repo"]["declared"], true);
+
+    // Inside an undeclared directory that matches the convention
+    // path but isn't in the manifest.
+    let undeclared_path = ws.path().join("src").join("rogue-svc");
+    std::fs::create_dir_all(&undeclared_path).unwrap();
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&undeclared_path)
+        .args(["ws"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Current repo: rogue-svc (NOT declared in manifest)"));
+}
+
+/// A malformed manifest produces a clean error — the file exists,
+/// so we don't fall through to "no manifest yet"; we propagate the
+/// parse error with context.
+#[test]
+fn ws_with_malformed_manifest_fails_with_helpful_error() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest("this is not [[ valid toml");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to read workspace manifest")
+            || stderr.contains("failed to parse manifest"),
+        "expected manifest-related error context, got: {stderr}"
+    );
+}
+
+/// At the workspace root with no manifest, the human form announces
+/// the absence rather than crashing.
+#[test]
+fn ws_without_manifest_announces_the_gap() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace(); // no manifest written
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No manifest yet"),
+        "expected 'no manifest yet' notice, got: {stdout}"
+    );
 }
 
 /// Outside any workspace, `git ws` exits non-zero with a helpful

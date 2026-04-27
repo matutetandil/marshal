@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 pub const WORKSPACE_MARKER: &str = ".workspace";
 
 /// The manifest file inside the workspace marker directory.
-#[allow(dead_code)] // Consumed by the manifest-parsing slice (Phase 2 / Slice B).
 pub const MANIFEST_FILE: &str = "manifest.toml";
 
 /// The state declaration file.
