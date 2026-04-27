@@ -904,6 +904,126 @@ fn malformed_config_falls_back_to_defaults_with_a_warning() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Actionable error hints
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Running any git command outside a repository triggers the
+/// `not-a-git-repository` hint after git's own error message. Exit code
+/// and the original stderr line stay byte-exact; the hint is appended.
+#[test]
+fn not_a_git_repository_emits_hint_after_git_error() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let non_repo = TempDir::new().unwrap();
+
+    let direct = StdCommand::new("git")
+        .current_dir(non_repo.path())
+        .arg("status")
+        .output()
+        .expect("run git status");
+    let wrapped = marshal_with_isolated_config(&cfg_path)
+        .current_dir(non_repo.path())
+        .arg("status")
+        .output()
+        .expect("run marshal status");
+
+    assert_eq!(direct.status.code(), wrapped.status.code());
+
+    let stderr = String::from_utf8_lossy(&wrapped.stderr);
+    // Git's own message must appear unchanged (substring, since the path
+    // suffix can vary by platform).
+    assert!(
+        stderr.contains("not a git repository"),
+        "git's own error must still appear, got: {stderr}"
+    );
+    // Marshal's hint is appended below it.
+    assert!(
+        stderr.contains("marshal: hint:"),
+        "expected actionable hint on stderr, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("git init"),
+        "hint mentions `git init` as a remediation, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("`cd`"),
+        "hint mentions `cd` as a remediation, got: {stderr}"
+    );
+
+    // The hint comes *after* git's own line — order matters for
+    // readability.
+    let git_pos = stderr.find("not a git repository").unwrap();
+    let hint_pos = stderr.find("marshal: hint:").unwrap();
+    assert!(
+        git_pos < hint_pos,
+        "git's stderr precedes marshal's hint (git={git_pos}, hint={hint_pos})"
+    );
+}
+
+/// `errors.actionable_hints = false` restores pure passthrough: stderr
+/// matches `git`'s own bytes, and no hint is appended.
+#[test]
+fn actionable_hints_can_be_disabled_via_config() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let non_repo = TempDir::new().unwrap();
+
+    marshal_with_isolated_config(&cfg_path)
+        .args([
+            "marshal",
+            "config",
+            "set",
+            "errors.actionable_hints",
+            "false",
+        ])
+        .assert()
+        .success();
+
+    let direct = StdCommand::new("git")
+        .current_dir(non_repo.path())
+        .arg("status")
+        .output()
+        .expect("run git status");
+    let wrapped = marshal_with_isolated_config(&cfg_path)
+        .current_dir(non_repo.path())
+        .arg("status")
+        .output()
+        .expect("run marshal status with hints disabled");
+
+    assert_eq!(direct.status.code(), wrapped.status.code());
+    assert_eq!(
+        direct.stderr, wrapped.stderr,
+        "hints disabled must restore byte-exact stderr"
+    );
+    let stderr = String::from_utf8_lossy(&wrapped.stderr);
+    assert!(
+        !stderr.contains("marshal: hint:"),
+        "no hint must be appended when feature is off, got: {stderr}"
+    );
+}
+
+/// Successful git commands never get a hint, even when actionable_hints
+/// is on. Hints are gated behind `!status.success()`.
+#[test]
+fn successful_commands_do_not_get_hints() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let repo = init_git_repo();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(repo.path())
+        .arg("status")
+        .output()
+        .expect("marshal status in fresh repo");
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("marshal: hint:"),
+        "no hint on a successful command, got: {stderr}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Remaining passthrough-fidelity tests
 // ───────────────────────────────────────────────────────────────────────────
 

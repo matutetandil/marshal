@@ -96,13 +96,38 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_starts_empty_until_rules_ship() {
-        // Guards that `register_defaults` does not silently start firing
-        // hints before rule modules land. When the first batch arrives,
-        // this test is rewritten to assert specific rule_ids fire.
+    fn default_registry_contains_the_canonical_rules() {
+        // Smoke-test that `register_defaults` wired the first batch of
+        // rules through. Per-rule matching is covered in each rule
+        // module's own tests; this asserts the dispatch reaches them.
         let reg = Registry::default();
         let parsed = parse(&[]);
-        assert!(reg.first_hint(&ctx_for("anything", &parsed)).is_none());
+
+        let not_repo = reg
+            .first_hint(&ctx_for(
+                "fatal: not a git repository (or any of the parent directories): .git",
+                &parsed,
+            ))
+            .expect("not-a-git-repository fires");
+        assert_eq!(not_repo.rule_id, "not-a-git-repository");
+
+        let dubious = reg
+            .first_hint(&ctx_for(
+                "fatal: detected dubious ownership in repository at '/srv/repo'",
+                &parsed,
+            ))
+            .expect("dubious-ownership fires");
+        assert_eq!(dubious.rule_id, "dubious-ownership");
+
+        let pubkey = reg
+            .first_hint(&ctx_for("Permission denied (publickey).", &parsed))
+            .expect("ssh-publickey-denied fires");
+        assert_eq!(pubkey.rule_id, "ssh-publickey-denied");
+
+        // Unrelated stderr produces no hint.
+        assert!(reg
+            .first_hint(&ctx_for("error: pathspec 'foo' did not match", &parsed))
+            .is_none());
     }
 
     #[test]

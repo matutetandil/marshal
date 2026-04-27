@@ -20,13 +20,16 @@ use crate::git::parser::ParsedGitInvocation;
 /// `'a` ties the borrow lifetimes to the slot the registry calls from in
 /// `main`. Rules treat the context as read-only.
 ///
-/// `#[allow(dead_code)]` silences the fields until concrete rules consume
-/// them in the next step. `main` already populates the fields; the trait
-/// surface is fully wired.
-#[allow(dead_code)]
+/// The first batch of rules only inspects `stderr`; `parsed` and
+/// `exit_code` are populated by `main` and exposed here for rules that
+/// need them (the next batch covers e.g. push-specific failures, where
+/// gating on `parsed.subcommand` keeps the rule from firing on similar
+/// stderr from unrelated subcommands).
 pub struct HintContext<'a> {
     pub stderr: &'a str,
+    #[allow(dead_code)] // First read once non-stderr-only rules land in step 4.
     pub parsed: &'a ParsedGitInvocation,
+    #[allow(dead_code)] // Same reason as `parsed` above.
     pub exit_code: i32,
 }
 

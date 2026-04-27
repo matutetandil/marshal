@@ -1,20 +1,28 @@
 //! Concrete error-hint rules.
 //!
-//! The first batch ships in the next step of the 0.3.0 cycle, covering
-//! `not a git repository`, `dubious ownership`, and SSH key issues. This
-//! module exists so the registry has an `register_defaults` symbol to
-//! call from day one — adding a rule then becomes "implement
-//! `ErrorHintRule` + one line here".
+//! Organised loosely by failure domain so adding "another SSH hint" or
+//! "another repository-state hint" lands next to its siblings. Each
+//! file contains one or more rules and their unit tests.
 //!
-//! Ordering: registration order is the search order. As with
-//! modernization rules, when patterns overlap the more specific rule
-//! must be registered first so first-match-wins picks the narrower hit.
+//! Current coverage (3 of the planned ~20 hints):
+//!
+//! * **repository.rs** — `not a git repository`.
+//! * **ownership.rs** — `detected dubious ownership`.
+//! * **ssh.rs** — `Permission denied (publickey)`.
 
 use super::Registry;
 
-/// Register the canonical hint rules with `registry`. Empty in this
-/// step; rule files arrive next.
-pub fn register_defaults(_registry: &mut Registry) {
-    // Intentionally empty — rules are added in the next step of the
-    // 0.3.0 cycle.
+mod ownership;
+mod repository;
+mod ssh;
+
+/// Register the canonical hint rules with `registry`. Order is the search
+/// order; when patterns overlap, the more specific rule must be
+/// registered first so first-match-wins picks the narrower hit. The
+/// current set is mutually exclusive (each rule keys off a distinct
+/// substring), so order is not yet load-bearing.
+pub fn register_defaults(registry: &mut Registry) {
+    registry.register(Box::new(repository::NotAGitRepository));
+    registry.register(Box::new(ownership::DubiousOwnership));
+    registry.register(Box::new(ssh::PublicKeyDenied));
 }
