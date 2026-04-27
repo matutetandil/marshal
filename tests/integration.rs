@@ -1905,6 +1905,286 @@ branch = "feat/x"
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `ws log`
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Helper: init a child repo and stamp `n` commits with controlled
+/// dates (one per day starting at `2026-04-21`). Used by `ws log`
+/// tests so the global ordering is deterministic.
+fn init_child_repo_with_dated_commits(path: &std::path::Path, name_prefix: &str, n: usize) {
+    init_child_repo(path);
+    for i in 1..=n {
+        std::fs::write(
+            path.join("seed.txt"),
+            format!("{name_prefix}-v{i}").as_bytes(),
+        )
+        .unwrap();
+        StdCommand::new("git")
+            .current_dir(path)
+            .args(["add", "."])
+            .status()
+            .unwrap();
+        let date = format!("2026-04-{:02} 10:00:00", 20 + i);
+        StdCommand::new("git")
+            .current_dir(path)
+            .env("GIT_AUTHOR_DATE", &date)
+            .env("GIT_COMMITTER_DATE", &date)
+            .args(["commit", "-q", "-m", &format!("{name_prefix}: change {i}")])
+            .status()
+            .unwrap();
+    }
+}
+
+/// `ws log` outside a workspace fails with the same shape as `ws status`.
+#[test]
+fn ws_log_outside_workspace_fails() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let outside = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(outside.path())
+        .args(["ws", "log"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not in a marshal workspace"));
+}
+
+/// `ws log` in a workspace with no manifest errors with an `ws init` hint.
+#[test]
+fn ws_log_without_manifest_errors_helpfully() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("has no manifest yet") || stderr.contains("ws init"),
+        "expected manifest-missing hint, got: {stderr}"
+    );
+}
+
+/// Workspace with declared repos that do not exist on disk yet:
+/// `ws log` returns empty cleanly (no commits, no error).
+#[test]
+fn ws_log_with_no_repos_on_disk_yields_empty_output() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No commits yet") || stdout.contains("empty or missing"),
+        "expected empty-state notice, got: {stdout}"
+    );
+}
+
+/// With multiple repos, the entries are interleaved by date (most
+/// recent first) — this is the monorepo-feel half of the thesis.
+#[test]
+fn ws_log_interleaves_repos_by_date() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("alpha"), "a", 3);
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("beta"), "b", 3);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Total of 8 commits (init seed + 3 per repo, ×2 repos = 8). The
+    // most-recent date is 2026-04-23 (third change) — both repos
+    // share that date but should both appear above any 2026-04-22.
+    let pos_third = stdout.find("change 3").expect("change 3 should appear");
+    let pos_second = stdout.find("change 2").expect("change 2 should appear");
+    let pos_first = stdout.find("change 1").expect("change 1 should appear");
+    assert!(
+        pos_third < pos_second && pos_second < pos_first,
+        "expected newer-first ordering, got positions: third={pos_third}, second={pos_second}, first={pos_first}\nfull: {stdout}"
+    );
+}
+
+/// `-n <N>` caps the displayed entries; the footer announces the
+/// truncation.
+#[test]
+fn ws_log_n_flag_limits_and_announces_truncation() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("alpha"), "a", 5);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log", "-n", "2"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Two newest-by-date should be there — change 5 and change 4.
+    assert!(stdout.contains("change 5"));
+    assert!(stdout.contains("change 4"));
+    // Older changes should not appear.
+    assert!(
+        !stdout.contains("change 1"),
+        "older commit leaked through -n 2: {stdout}"
+    );
+    // Truncation footer announces the cap.
+    assert!(
+        stdout.contains("Showing top 2") && stdout.contains("--all"),
+        "expected truncation footer, got: {stdout}"
+    );
+}
+
+/// `--all` lifts the cap and skips the truncation footer.
+#[test]
+fn ws_log_all_flag_lifts_cap() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("alpha"), "a", 3);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log", "--all", "-n", "1"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Even with `-n 1`, --all wins: every commit (init seed + 3
+    // changes = 4 commits) appears.
+    assert!(stdout.contains("change 1"));
+    assert!(stdout.contains("change 2"));
+    assert!(stdout.contains("change 3"));
+    // No truncation footer when --all is set.
+    assert!(
+        !stdout.contains("Showing"),
+        "abbreviation footer should be off under --all, got: {stdout}"
+    );
+}
+
+/// JSON form returns the structured payload.
+#[test]
+fn ws_log_json_returns_full_payload() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("alpha"), "a", 2);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(parsed["workspace"]["name"], "demo");
+    assert_eq!(parsed["workspace"]["total_repos_declared"], 1);
+    assert_eq!(parsed["workspace"]["repos_with_data"], 1);
+
+    let entries = parsed["entries"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    let first = &entries[0];
+    assert_eq!(first["repo"], "alpha");
+    assert!(first["hash"].as_str().unwrap().len() >= 40);
+    assert!(first["date"].as_str().unwrap().contains("2026-04"));
+    assert_eq!(first["author"], "Test");
+}
+
+/// Unknown flags rejected with helpful error.
+#[test]
+fn ws_log_rejects_unknown_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log", "--bogus"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unexpected argument '--bogus'"),
+        "expected unknown-flag error, got: {stderr}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal help`
 // ───────────────────────────────────────────────────────────────────────────
 

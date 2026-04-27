@@ -35,6 +35,7 @@ use crate::workspace::manifest::Manifest;
 use crate::workspace::state::StateDeclaration;
 
 mod init;
+mod log;
 mod status;
 
 /// Threshold for "show full list inline" vs "show count + interesting only".
@@ -53,12 +54,15 @@ pub fn dispatch(args: &[OsString], all: bool, format: OutputFormat) -> Result<Ex
         Some("init") => run_command(init::WsInit, &args[1..], format),
         // `git ws status` — aggregated read-only view across child repos.
         Some("status") => run_command(status::WsStatus { all }, &args[1..], format),
+        // `git ws log` — aggregated commit log across child repos.
+        Some("log") => run_command(log::WsLog { all }, &args[1..], format),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
                  Run `git ws` for the workspace context, `git ws init` \
-                 to create one, or `git ws status` for the aggregated \
-                 view. More subcommands arrive in Phase 2 — see ROADMAP.md."
+                 to create one, `git ws status` for the aggregated state, \
+                 or `git ws log` for cross-repo activity. More subcommands \
+                 arrive in Phase 2 — see ROADMAP.md."
             );
             Ok(ExitCode::from(2))
         }
