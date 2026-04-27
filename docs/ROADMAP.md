@@ -94,7 +94,12 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   workspace (no manifest yet) is not an error. `git ws` shows the
   workspace name + default branch + declared repo list; reconciles
   `current_repo` against the manifest's declared repos.
-- [ ] State.toml parsing and validation
+- [x] State.toml parsing and validation. Same three-way load semantics
+  as the manifest. `git ws` shows per-repo declared branches with
+  the universal hide-boring abbreviation: pinned repos listed
+  individually, default-branch repos collapsed into a count line.
+  Global `--all` flag (mirrors `--json` shape) overrides the
+  abbreviation. Threshold for unconditional expansion: 5 repos.
 - [ ] Workspace clone: `ws clone <url>` (clones workspace + all child repos in parallel)
 - [ ] Workspace status: aggregated view of all repos, divergence reporting
 - [ ] Workspace log: aggregated or per-repo depending on context

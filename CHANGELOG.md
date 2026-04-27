@@ -14,6 +14,40 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **State.toml parsing.** The Phase 0 scaffold of
+  `src/workspace/state.rs` (parser + 3 unit tests) goes live in
+  Slice C. New `StateDeclaration::try_load_from_workspace(root)`
+  with the same three-way semantics as the manifest loader:
+  `Ok(None)` when no state.toml exists (every repo defaults),
+  `Ok(Some)` when loaded, `Err` when malformed.
+- **Global `--all` flag** on the `ws` namespace. Mirrors the shape
+  of `--json`: extracted in `cli::dispatch_ws`, stripped from
+  argv, threaded to each workspace Command through a dedicated
+  field on the Command struct (the trait surface stays unchanged).
+- **Hide-boring presentation pattern** for workspace commands.
+  Workspaces can hold dozens or hundreds of child repos; raw
+  enumeration produces unreadable output. Default behaviour:
+  surface only "interesting" repos (pinned to a non-default
+  branch by state.toml) individually; collapse repos on the
+  default branch into a single count line. `--all` overrides the
+  abbreviation. Threshold for unconditional expansion: total
+  `≤ 5` repos. JSON consumers always get the full data —
+  `--all` only affects the human form.
+- **`git ws` enriched with state info.** Output now reports per-repo
+  declared branches (state.toml override or manifest default),
+  with the hide-boring abbreviation by default. Four rendering
+  modes:
+  - All repos on default → one summary line
+    ("all 8 repos on default branch.").
+  - Few pinned, many defaulted → list pinned, count defaulted.
+  - Many pinned and many defaulted → counts only.
+  - `--all` → every repo listed in full.
+- **`current_repo.declared_branch`** in the JSON form: the
+  effective branch state.toml declares for the cwd's child repo
+  (or the manifest default if state.toml says nothing). Human
+  form shows it inline:
+  `Current repo: service-a (declared, state declares \`feat/x\`)`.
+
 - **Manifest parsing.** The Phase 0 scaffold of
   `src/workspace/manifest.rs` (parser + validator + 4 unit tests)
   goes live in Slice B. New `Manifest::try_load_from_workspace(root)`
