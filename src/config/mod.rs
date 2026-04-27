@@ -49,6 +49,9 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     #[serde(skip_serializing_if = "ModernizeConfig::is_empty")]
     pub modernize: ModernizeConfig,
+
+    #[serde(skip_serializing_if = "ErrorsConfig::is_empty")]
+    pub errors: ErrorsConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -67,6 +70,19 @@ impl ModernizeConfig {
     }
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ErrorsConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actionable_hints: Option<bool>,
+}
+
+impl ErrorsConfig {
+    fn is_empty(&self) -> bool {
+        self.actionable_hints.is_none()
+    }
+}
+
 impl Config {
     /// Effective value of `modernize.tips` after all layers and defaults.
     /// Default: `true` — tips are informational, low-noise, opt-in off.
@@ -81,11 +97,21 @@ impl Config {
         self.modernize.rewrite.unwrap_or(false)
     }
 
+    /// Effective value of `errors.actionable_hints` after all layers and
+    /// defaults. Default: `true` — hints fire only on git failures
+    /// (exit ≠ 0) and are additive (printed after git's own stderr), so
+    /// the on-by-default surface area is small. Disabling restores pure
+    /// passthrough: stderr is inherited again and no rule registry runs.
+    pub fn actionable_hints(&self) -> bool {
+        self.errors.actionable_hints.unwrap_or(true)
+    }
+
     /// Render the value for one key, falling back through defaults.
     pub fn get_effective_string(&self, key: ConfigKey) -> String {
         match key {
             ConfigKey::ModernizeTips => self.modernize_tips().to_string(),
             ConfigKey::ModernizeRewrite => self.modernize_rewrite().to_string(),
+            ConfigKey::ErrorsActionableHints => self.actionable_hints().to_string(),
         }
     }
 
@@ -94,6 +120,9 @@ impl Config {
         match key {
             ConfigKey::ModernizeTips => self.modernize.tips = Some(parse_bool(value)?),
             ConfigKey::ModernizeRewrite => self.modernize.rewrite = Some(parse_bool(value)?),
+            ConfigKey::ErrorsActionableHints => {
+                self.errors.actionable_hints = Some(parse_bool(value)?)
+            }
         }
         Ok(())
     }
@@ -104,6 +133,7 @@ impl Config {
         match key {
             ConfigKey::ModernizeTips => self.modernize.tips = None,
             ConfigKey::ModernizeRewrite => self.modernize.rewrite = None,
+            ConfigKey::ErrorsActionableHints => self.errors.actionable_hints = None,
         }
     }
 
@@ -115,6 +145,9 @@ impl Config {
         match key {
             ConfigKey::ModernizeTips => self.modernize.tips.map(|b| b.to_string()),
             ConfigKey::ModernizeRewrite => self.modernize.rewrite.map(|b| b.to_string()),
+            ConfigKey::ErrorsActionableHints => {
+                self.errors.actionable_hints.map(|b| b.to_string())
+            }
         }
     }
 }
@@ -130,6 +163,7 @@ impl Config {
 pub enum ConfigKey {
     ModernizeTips,
     ModernizeRewrite,
+    ErrorsActionableHints,
 }
 
 impl ConfigKey {
@@ -137,8 +171,12 @@ impl ConfigKey {
         match s {
             "modernize.tips" => Ok(Self::ModernizeTips),
             "modernize.rewrite" => Ok(Self::ModernizeRewrite),
+            "errors.actionable_hints" => Ok(Self::ErrorsActionableHints),
             other => bail!(
-                "unknown config key '{other}'. Known keys:\n  modernize.tips\n  modernize.rewrite"
+                "unknown config key '{other}'. Known keys:\n  \
+                 modernize.tips\n  \
+                 modernize.rewrite\n  \
+                 errors.actionable_hints"
             ),
         }
     }
@@ -147,6 +185,7 @@ impl ConfigKey {
         match self {
             Self::ModernizeTips => "modernize.tips",
             Self::ModernizeRewrite => "modernize.rewrite",
+            Self::ErrorsActionableHints => "errors.actionable_hints",
         }
     }
 
@@ -156,11 +195,18 @@ impl ConfigKey {
             Self::ModernizeRewrite => {
                 "Rewrite legacy commands to their modern forms before running git."
             }
+            Self::ErrorsActionableHints => {
+                "Append actionable hints on stderr when git exits with an error."
+            }
         }
     }
 
     pub fn all() -> &'static [Self] {
-        &[Self::ModernizeTips, Self::ModernizeRewrite]
+        &[
+            Self::ModernizeTips,
+            Self::ModernizeRewrite,
+            Self::ErrorsActionableHints,
+        ]
     }
 }
 
@@ -288,6 +334,9 @@ fn merge(base: &mut Config, overlay: Config) {
     if overlay.modernize.rewrite.is_some() {
         base.modernize.rewrite = overlay.modernize.rewrite;
     }
+    if overlay.errors.actionable_hints.is_some() {
+        base.errors.actionable_hints = overlay.errors.actionable_hints;
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -313,6 +362,10 @@ mod tests {
         assert!(
             !cfg.modernize_rewrite(),
             "rewrite defaults to disabled (conservative)"
+        );
+        assert!(
+            cfg.actionable_hints(),
+            "actionable hints default to enabled — opt-out, not opt-in"
         );
     }
 
@@ -405,8 +458,25 @@ mod tests {
             ConfigKey::from_dotted("modernize.rewrite"),
             Ok(ConfigKey::ModernizeRewrite)
         ));
+        assert!(matches!(
+            ConfigKey::from_dotted("errors.actionable_hints"),
+            Ok(ConfigKey::ErrorsActionableHints)
+        ));
         assert!(ConfigKey::from_dotted("modernize.TIPS").is_err());
         assert!(ConfigKey::from_dotted("garbage").is_err());
+    }
+
+    #[test]
+    fn actionable_hints_round_trips_through_set_unset() {
+        let mut cfg = Config::default();
+        cfg.set_from_str(ConfigKey::ErrorsActionableHints, "false")
+            .unwrap();
+        assert!(!cfg.actionable_hints());
+        cfg.unset(ConfigKey::ErrorsActionableHints);
+        assert!(
+            cfg.actionable_hints(),
+            "fall back to default after unset"
+        );
     }
 
     #[test]

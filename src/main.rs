@@ -18,6 +18,7 @@ mod cli;
 mod commands;
 mod config;
 mod context;
+mod error_hints;
 mod git;
 mod modernize;
 mod workspace;
@@ -74,19 +75,39 @@ fn main() -> ExitCode {
         args.clone()
     };
 
-    // `--version` augmentation. When the user asks `git --version` (no
-    // subcommand), the tradition (php+xdebug, node+npm, …) is for each tool
-    // in the chain to identify itself. After git's own version line lands on
-    // stdout, marshal prints its own. Guarded by `status.success()` so we
-    // don't layer Marshal's line on top of a git failure.
+    // Two augmentations layer on top of the passthrough:
     //
-    // `capture_stderr = false` keeps stderr inherited and behaviour
-    // byte-for-byte identical to git. The 0.3.0 actionable error hints
-    // feature flips this to `true` once a hint registry is wired up — see
-    // `error_hints/` (added in a later step).
+    // * `--version`: after `git --version` succeeds, marshal appends its own
+    //   version line on stdout (the node+npm / php+xdebug pattern).
+    // * Actionable error hints: when git fails and the feature is enabled,
+    //   stderr is teed (so the hint registry can pattern-match it after the
+    //   fact) and a hint is printed below git's own message.
+    //
+    // The hints feature gates the stderr capture mode itself: with
+    // `errors.actionable_hints = false` we revert to inherit stderr and skip
+    // the registry entirely, restoring pure passthrough.
+    let hint_registry = error_hints::Registry::default();
+    let actionable_hints = effective_config.actionable_hints();
     let is_version_query = is_version_only_query(&parsed);
-    match commands::passthrough::run_returning_outcome(&forward, false) {
-        commands::passthrough::Outcome::Ran { status, .. } => {
+
+    match commands::passthrough::run_returning_outcome(&forward, actionable_hints) {
+        commands::passthrough::Outcome::Ran {
+            status,
+            captured_stderr,
+        } => {
+            if !status.success() {
+                if let Some(buf) = captured_stderr.as_ref() {
+                    let stderr_text = String::from_utf8_lossy(buf);
+                    let ctx = error_hints::HintContext {
+                        stderr: stderr_text.as_ref(),
+                        parsed: &parsed,
+                        exit_code: status.code().unwrap_or(-1),
+                    };
+                    if let Some(hint) = hint_registry.first_hint(&ctx) {
+                        hint.emit_to_stderr();
+                    }
+                }
+            }
             if is_version_query && status.success() {
                 println!("marshal version {}", env!("CARGO_PKG_VERSION"));
             }
