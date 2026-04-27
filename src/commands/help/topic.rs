@@ -12,6 +12,36 @@
 use crate::cli::Renderable;
 use serde::Serialize;
 use std::io::{self, Write};
+use std::process::{Command, Stdio};
+
+/// Snapshot of the cwd context that context-aware topics consult.
+///
+/// Cheap to detect (one `git rev-parse` shellout); produced once per
+/// `marshal help` invocation by topics that need it. Topics whose
+/// content does not depend on context simply skip detection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelpContext {
+    pub in_git_repo: bool,
+}
+
+impl HelpContext {
+    /// Detect the context. Wraps `git rev-parse --is-inside-work-tree`
+    /// with stdio silenced so a "fatal: not a git repository" message
+    /// from git does not leak into our output. Any failure (git not
+    /// installed, exit non-zero) is interpreted as "outside a repo" —
+    /// the worst-case interpretation never makes the help wrong, only
+    /// less specific.
+    pub fn detect() -> Self {
+        let in_git_repo = Command::new("git")
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        Self { in_git_repo }
+    }
+}
 
 /// One section of help — a heading and its body lines. Sections are
 /// composable so the human renderer can blank-line between them and
