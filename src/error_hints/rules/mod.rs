@@ -4,25 +4,34 @@
 //! "another repository-state hint" lands next to its siblings. Each
 //! file contains one or more rules and their unit tests.
 //!
-//! Current coverage (3 of the planned ~20 hints):
+//! Current coverage (6 of the planned ~20 hints):
 //!
 //! * **repository.rs** — `not a git repository`.
 //! * **ownership.rs** — `detected dubious ownership`.
 //! * **ssh.rs** — `Permission denied (publickey)`.
+//! * **push.rs** — non-fast-forward push rejection.
+//! * **working_tree.rs** — `local changes would be overwritten`.
+//! * **merge.rs** — `refusing to merge unrelated histories`.
 
 use super::Registry;
 
+mod merge;
 mod ownership;
+mod push;
 mod repository;
 mod ssh;
+mod working_tree;
 
 /// Register the canonical hint rules with `registry`. Order is the search
 /// order; when patterns overlap, the more specific rule must be
 /// registered first so first-match-wins picks the narrower hit. The
 /// current set is mutually exclusive (each rule keys off a distinct
-/// substring), so order is not yet load-bearing.
+/// substring or subcommand), so order is not yet load-bearing.
 pub fn register_defaults(registry: &mut Registry) {
     registry.register(Box::new(repository::NotAGitRepository));
     registry.register(Box::new(ownership::DubiousOwnership));
     registry.register(Box::new(ssh::PublicKeyDenied));
+    registry.register(Box::new(push::PushNonFastForward));
+    registry.register(Box::new(working_tree::LocalChangesWouldBeOverwritten));
+    registry.register(Box::new(merge::UnrelatedHistories));
 }
