@@ -14,6 +14,27 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **Manifest parsing.** The Phase 0 scaffold of
+  `src/workspace/manifest.rs` (parser + validator + 4 unit tests)
+  goes live in Slice B. New `Manifest::try_load_from_workspace(root)`
+  with three-way semantics: `Ok(None)` when the manifest file does
+  not exist (a workspace can be partially initialised), `Ok(Some)`
+  when loaded and valid, `Err` when malformed. Matches Invariant 4
+  (Manifest as Source of Truth) — a missing manifest is a state of
+  incompleteness, not an error.
+- **`git ws` enriched with manifest data.** When the workspace has
+  a manifest, the bare `git ws` command shows the workspace name,
+  default branch, and the comma-joined list of declared repos;
+  the JSON form returns the structured summary. When there is no
+  manifest yet, the human form announces the gap and the JSON
+  omits the `manifest` field entirely.
+- **`current_repo` reconciliation against the manifest.** The
+  `current_repo` field on `WsContextOutput` is now
+  `Option<CurrentRepo { name, declared }>`. `declared` is `true`
+  when a repo with this name is in the manifest; `false` when the
+  cwd matches the convention path (`<root>/src/<name>/`) but the
+  manifest does not know about it — a hint that the directory is
+  rogue, mistyped, or the manifest has fallen behind reality.
 - **`ws` namespace.** Sibling to the `marshal` namespace; with
   marshal aliased to git, the user invokes workspace operations
   as `git ws <…>`. The choice of a separate top-level namespace

@@ -89,7 +89,11 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   the manifest in the manifest-parsing slice). Reachable via
   `git ws` (the bare command in the new `ws` sibling namespace).
 - [ ] Workspace initialization: `ws init` (creates `.workspace/` structure)
-- [ ] Manifest parsing and validation
+- [x] Manifest parsing and validation. `Manifest::try_load_from_workspace`
+  with `Ok(None)` / `Ok(Some)` / `Err` semantics so a partially-initialised
+  workspace (no manifest yet) is not an error. `git ws` shows the
+  workspace name + default branch + declared repo list; reconciles
+  `current_repo` against the manifest's declared repos.
 - [ ] State.toml parsing and validation
 - [ ] Workspace clone: `ws clone <url>` (clones workspace + all child repos in parallel)
 - [ ] Workspace status: aggregated view of all repos, divergence reporting
