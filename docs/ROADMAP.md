@@ -41,14 +41,20 @@ The product is built in phases, each self-contained and releasable. Each phase e
   `PRINCIPLES.md` rule "don't improve Git in passthrough" limits what we
   can do before workspace context arrives (Phase 2). Revisit once workspace
   mode provides a natural scope for the augmentation.
-- [~] Actionable error messages for common Git errors (top 20). First six
-  rules and the `error_hints/` Strategy registry shipped on `main`
-  (mid-cycle, see CHANGELOG `[Unreleased]`):
-  `not-a-git-repository`, `dubious-ownership`, `ssh-publickey-denied`,
-  `push-non-fast-forward`, `local-changes-would-be-overwritten`,
+- [~] Actionable error messages for common Git errors (top 20). 13 rules
+  and the `error_hints/` Strategy registry shipped on `main` (mid-cycle,
+  see CHANGELOG `[Unreleased]`), covering most of the high-friction
+  failures a real user hits: `not-a-git-repository`, `dubious-ownership`,
+  `empty-ident`, `ssh-publickey-denied`, `https-auth-failed`,
+  `host-resolution-failed`, `push-non-fast-forward`,
+  `upstream-not-configured`, `src-refspec-no-match`, `pathspec-no-match`,
+  `ambiguous-argument`, `local-changes-would-be-overwritten`,
   `unrelated-histories`. Stderr capture mode landed in
   `commands::passthrough` to support the registry; opt-out via
   `errors.actionable_hints = false` restores byte-exact passthrough.
+  Remaining ~7 rules cover progressively rarer failures (cannot lock
+  ref, branch -D not fully merged, dubious permissions on `~/.ssh`, …)
+  and will land opportunistically.
 - [ ] `help` command with context-awareness
 - [ ] `what-now` command that analyzes current state and suggests next actions
 - [ ] Output modes: human (colors, interactive) and machine (JSON, scripting)

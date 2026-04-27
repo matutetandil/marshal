@@ -6,10 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work in progress on `0.3.0` — completing Phase 1. First chunk shipped:
-the architecture for actionable error hints plus six rules covering the
-most frequent high-friction Git failures. Still to come: more hint
-rules toward the planned ~20, context-aware `help`, the `what-now`
+Work in progress on `0.3.0` — completing Phase 1. Two chunks shipped so
+far: the architecture for actionable error hints plus 13 of the planned
+~20 rules, covering most of the high-friction Git failures a developer
+hits in real use. Still to come: a few more hint rules toward the
+remaining low-frequency cases, context-aware `help`, the `what-now`
 command, and JSON output modes. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
@@ -20,19 +21,54 @@ command, and JSON output modes. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
   concrete next steps. Hints fire only on git failures and never
   modify git's own output.
 
-  Six rules in this slice:
+  Thirteen rules in this cycle, organised by failure domain:
+
+  *Repository / setup:*
   - `not-a-git-repository` — points the user at `git init` (new project)
     or `cd` (existing project).
   - `dubious-ownership` — explains that git refuses for security and
     surfaces both `safe.directory <path>` (per-repo) and
     `safe.directory '*'` (less secure, all directories) options.
+  - `empty-ident` — fires on empty author identity / `Author identity
+    unknown` / `Please tell me who you are`. Surfaces the exact
+    `git config --global user.name/user.email` commands and the
+    per-repo variant.
+
+  *Authentication:*
   - `ssh-publickey-denied` — walks through `ssh-add -l`, host-side key
     registration, and an `ssh -T` connectivity check.
+  - `https-auth-failed` — fires on `Authentication failed for 'https://…'`.
+    Anchored on the `'https` prefix to stay off the SSH path. Hint
+    covers PAT generation (passwords no longer accepted by GitHub since
+    2021), switching the remote to SSH with `git remote set-url`, and
+    setting up a `credential.helper`.
+
+  *Network:*
+  - `host-resolution-failed` — fires on `Could not resolve host`. Hint
+    walks connectivity / VPN-hijacked DNS, typoed remote URL
+    (`git remote -v`), and direct verification with `ping` / `nslookup`.
+
+  *Push lifecycle (all gated on `parsed.subcommand_is("push")`):*
   - `push-non-fast-forward` — recommends `git pull --rebase && git push`
     with `--force-with-lease` (never plain `--force`) as the deliberate
-    alternative. Gated on `parsed.subcommand == "push"` so the same
-    stderr substring captured from an unrelated wrapper does not trigger
-    the hint.
+    alternative.
+  - `upstream-not-configured` — first push of a new branch. Surfaces
+    `git push -u origin <branch>` and the `git branch --show-current`
+    helper.
+  - `src-refspec-no-match` — push has nothing to send. Three remediations
+    walked: no commits yet (`git log --oneline -1`), wrong current
+    branch (`git branch --show-current`), or detached HEAD
+    (`git switch -c <new-name>`).
+
+  *Pathspec / refs:*
+  - `pathspec-no-match` — fires on `pathspec '…' did not match any file`.
+    Common across `git checkout/switch/restore/add` when the user typoed
+    a path or referenced a brand-new file before adding it.
+  - `ambiguous-argument` — fires on `ambiguous argument '…': unknown
+    revision or path`. Front-loads `git fetch` (most common cause is a
+    branch/tag that exists on the remote but hasn't been fetched).
+
+  *Working tree / merge:*
   - `local-changes-would-be-overwritten` — fires on the canonical refusal
     from `checkout`/`switch`/`pull`/`merge`/`rebase` when uncommitted
     changes block the operation. Walks through stash, commit, and `git

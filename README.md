@@ -77,16 +77,23 @@ marshal: hint: this directory is not inside a Git repository.
   • If you meant to work in an existing repo, `cd` into it first.
 ```
 
-Six rules ship today, covering some of the highest-friction Git failures:
+Thirteen rules ship today, covering most of the high-friction Git failures:
 
-| Rule                                  | Fires on                                                 |
-|---------------------------------------|-----------------------------------------------------------|
-| `not-a-git-repository`                | `fatal: not a git repository …`                          |
-| `dubious-ownership`                   | `detected dubious ownership in repository at …`          |
-| `ssh-publickey-denied`                | `Permission denied (publickey)` from a Git SSH remote    |
-| `push-non-fast-forward`               | `git push` rejected because the remote moved ahead       |
-| `local-changes-would-be-overwritten`  | `checkout`/`switch`/`pull`/`merge`/`rebase` blocked by uncommitted changes |
-| `unrelated-histories`                 | `refusing to merge unrelated histories`                  |
+| Rule                                  | Fires on                                                                       |
+|---------------------------------------|--------------------------------------------------------------------------------|
+| `not-a-git-repository`                | `fatal: not a git repository …`                                                |
+| `dubious-ownership`                   | `detected dubious ownership in repository at …`                                |
+| `empty-ident`                         | empty author identity / `Author identity unknown`                              |
+| `ssh-publickey-denied`                | `Permission denied (publickey)` from a Git SSH remote                          |
+| `https-auth-failed`                   | `fatal: Authentication failed for 'https://…'`                                 |
+| `host-resolution-failed`              | `Could not resolve host` (DNS / network / VPN)                                 |
+| `push-non-fast-forward`               | `git push` rejected because the remote moved ahead                             |
+| `upstream-not-configured`             | first push of a new branch — no upstream configured                            |
+| `src-refspec-no-match`                | push has nothing to send (no commits / wrong branch / detached HEAD)           |
+| `pathspec-no-match`                   | `pathspec '…' did not match any file`                                          |
+| `ambiguous-argument`                  | `ambiguous argument: unknown revision or path`                                 |
+| `local-changes-would-be-overwritten`  | `checkout`/`switch`/`pull`/`merge`/`rebase` blocked by uncommitted changes     |
+| `unrelated-histories`                 | `refusing to merge unrelated histories`                                        |
 
 Hints fire only on git failures (exit ≠ 0) and never modify git's own output. Disable with:
 
