@@ -35,6 +35,7 @@ use crate::workspace::manifest::Manifest;
 use crate::workspace::state::StateDeclaration;
 
 mod init;
+mod status;
 
 /// Threshold for "show full list inline" vs "show count + interesting only".
 /// Below or equal to this, the human form expands unconditionally; above it,
@@ -50,12 +51,14 @@ pub fn dispatch(args: &[OsString], all: bool, format: OutputFormat) -> Result<Ex
         None => run_command(WsContextInfo { all }, args, format),
         // `git ws init` — create a `.workspace/` directory here.
         Some("init") => run_command(init::WsInit, &args[1..], format),
+        // `git ws status` — aggregated read-only view across child repos.
+        Some("status") => run_command(status::WsStatus { all }, &args[1..], format),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
-                 Run `git ws` for the workspace context, or \
-                 `git ws init` to create one. More subcommands \
-                 arrive in Phase 2 — see ROADMAP.md."
+                 Run `git ws` for the workspace context, `git ws init` \
+                 to create one, or `git ws status` for the aggregated \
+                 view. More subcommands arrive in Phase 2 — see ROADMAP.md."
             );
             Ok(ExitCode::from(2))
         }

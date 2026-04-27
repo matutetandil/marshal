@@ -20,11 +20,12 @@
 //! human-readable `git status`.
 
 use anyhow::{bail, Context, Result};
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// One-shot snapshot of a repository.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct RepoState {
     pub branch: BranchInfo,
     pub working_tree: WorkingTreeInfo,
@@ -32,7 +33,7 @@ pub struct RepoState {
 }
 
 /// Branch identity and remote relationship.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct BranchInfo {
     /// Current branch name. `None` when HEAD is detached or the
     /// repository is at its initial empty state.
@@ -51,7 +52,7 @@ pub struct BranchInfo {
 /// Working tree + index counters. We aggregate counts (rather than
 /// keep file lists) because every consumer decides on counts; if a
 /// future consumer needs the names, we'll add a `paths` field then.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct WorkingTreeInfo {
     /// Files with non-`.` in the **index** column (changes ready to
     /// commit). Counts include renames and copies.
@@ -80,8 +81,10 @@ impl WorkingTreeInfo {
 }
 
 /// Multi-step operations the user is in the middle of. Detected via
-/// well-known files inside `<git-dir>/`.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// well-known files inside `<git-dir>/`. `Serialize` chooses the
+/// variant name (`"None"`, `"Merge"`, …) — JSON consumers can
+/// branch on the string.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum InProgressOp {
     #[default]
     None,

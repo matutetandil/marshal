@@ -1601,6 +1601,310 @@ fn ws_init_rejects_unknown_flag() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `ws status`
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Helper: turn a directory into a clean git repo on `main` with
+/// a single seed commit. Used by `ws status` tests to populate
+/// child repos with controlled state.
+fn init_child_repo(path: &std::path::Path) {
+    std::fs::create_dir_all(path).unwrap();
+    StdCommand::new("git")
+        .current_dir(path)
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(path)
+        .args(["config", "user.email", "t@example.com"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(path)
+        .args(["config", "user.name", "Test"])
+        .status()
+        .unwrap();
+    std::fs::write(path.join("seed.txt"), b"seed").unwrap();
+    StdCommand::new("git")
+        .current_dir(path)
+        .args(["add", "."])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(path)
+        .args(["commit", "-q", "-m", "seed"])
+        .status()
+        .unwrap();
+}
+
+/// `ws status` outside a workspace fails cleanly.
+#[test]
+fn ws_status_outside_workspace_fails() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let outside = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(outside.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not in a marshal workspace"));
+}
+
+/// Workspace exists but no manifest yet — `ws status` errors with
+/// a hint pointing at `ws init`.
+#[test]
+fn ws_status_without_manifest_errors_helpfully() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("has no manifest yet") || stderr.contains("ws init"),
+        "expected manifest-missing hint, got: {stderr}"
+    );
+}
+
+/// With a few clean repos (≤ 5) all on the declared branch, the
+/// human form lists every one inline (no abbreviation kicks in).
+#[test]
+fn ws_status_lists_small_repo_set_inline() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+    init_child_repo(&ws.path().join("src").join("alpha"));
+    init_child_repo(&ws.path().join("src").join("beta"));
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Workspace `demo`"));
+    assert!(stdout.contains("alpha"));
+    assert!(stdout.contains("beta"));
+    assert!(stdout.contains("on `main`"));
+}
+
+/// With > 5 repos all clean+on-declared, hide-boring kicks in:
+/// the body collapses to the "All N clean" summary.
+#[test]
+fn ws_status_collapses_all_clean_when_total_above_threshold() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    let mut manifest = String::from("[workspace]\nname = \"demo\"\n\n");
+    for i in 0..6 {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"svc-{i}\"\nurl = \"git@example.com:svc-{i}.git\"\n\n"
+        ));
+    }
+    let ws = make_workspace_with_manifest(&manifest);
+    for i in 0..6 {
+        init_child_repo(&ws.path().join("src").join(format!("svc-{i}")));
+    }
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("All 6 repos clean and on declared branch"),
+        "expected all-clean summary, got: {stdout}"
+    );
+}
+
+/// Mixed: most repos clean, one dirty, one missing → only the
+/// "interesting" two are listed; the clean ones collapse to a
+/// count.
+#[test]
+fn ws_status_surfaces_only_interesting_under_hide_boring() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    let mut manifest = String::from("[workspace]\nname = \"demo\"\n\n");
+    for i in 0..7 {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"svc-{i}\"\nurl = \"git@example.com:svc-{i}.git\"\n\n"
+        ));
+    }
+    let ws = make_workspace_with_manifest(&manifest);
+    init_child_repo(&ws.path().join("src").join("svc-0"));
+    std::fs::write(
+        ws.path().join("src").join("svc-0").join("seed.txt"),
+        b"modified",
+    )
+    .unwrap();
+    // svc-1 deliberately not created.
+    for i in 2..7 {
+        init_child_repo(&ws.path().join("src").join(format!("svc-{i}")));
+    }
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("svc-0") && stdout.contains("unstaged"),
+        "expected svc-0 dirty line, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("svc-1") && stdout.contains("missing on disk"),
+        "expected svc-1 missing line, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("5 other repos clean and on declared branch"),
+        "expected boring-count line, got: {stdout}"
+    );
+}
+
+/// `--all` expands the full list — clean repos appear too.
+#[test]
+fn ws_status_all_flag_expands_clean_repos() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    let mut manifest = String::from("[workspace]\nname = \"demo\"\n\n");
+    for i in 0..7 {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"svc-{i}\"\nurl = \"git@example.com:svc-{i}.git\"\n\n"
+        ));
+    }
+    let ws = make_workspace_with_manifest(&manifest);
+    for i in 0..7 {
+        init_child_repo(&ws.path().join("src").join(format!("svc-{i}")));
+    }
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--all"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for i in 0..7 {
+        assert!(
+            stdout.contains(&format!("svc-{i}")),
+            "svc-{i} should appear with --all, got: {stdout}"
+        );
+    }
+    assert!(
+        !stdout.contains("other repos clean"),
+        "abbreviation should be off, got: {stdout}"
+    );
+}
+
+/// JSON form returns full data: workspace info plus per-repo
+/// snapshot.
+#[test]
+fn ws_status_json_returns_full_per_repo_payload() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+    init_child_repo(&ws.path().join("src").join("alpha"));
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(parsed["workspace"]["name"], "demo");
+    assert!(parsed["workspace"]["root"].is_string());
+
+    let repos = parsed["repos"].as_array().unwrap();
+    assert_eq!(repos.len(), 1);
+    let alpha = &repos[0];
+    assert_eq!(alpha["name"], "alpha");
+    assert_eq!(alpha["path"], "src/alpha");
+    assert_eq!(alpha["declared_branch"], "main");
+    assert_eq!(alpha["clean_on_declared"], true);
+    assert_eq!(alpha["missing_from_disk"], false);
+    assert_eq!(alpha["state"]["branch"]["name"], "main");
+    assert_eq!(alpha["state"]["working_tree"]["staged"], 0);
+}
+
+/// state.toml override flows through: a repo pinned to a non-default
+/// branch is reported as "interesting" when it sits on the default.
+#[test]
+fn ws_status_reports_off_declared_branch_when_state_pins_one() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+    write_state(
+        &ws,
+        r#"[repos."alpha"]
+branch = "feat/x"
+"#,
+    );
+    // On-disk repo is on `main`, but state.toml pins `feat/x`.
+    init_child_repo(&ws.path().join("src").join("alpha"));
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("on `main`") && stdout.contains("declared `feat/x`"),
+        "expected off-declared note, got: {stdout}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal help`
 // ───────────────────────────────────────────────────────────────────────────
 
