@@ -88,7 +88,13 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   the `<root>/src/<name>/…` convention (will be reconciled against
   the manifest in the manifest-parsing slice). Reachable via
   `git ws` (the bare command in the new `ws` sibling namespace).
-- [ ] Workspace initialization: `ws init` (creates `.workspace/` structure)
+- [x] Workspace initialization: `ws init` (creates `.workspace/` structure).
+  `--name` and `--default-branch` flags with sensible defaults (cwd
+  basename, `git config init.defaultBranch`). Refuses to run inside
+  an existing workspace; `--force` overrides. Manifest is written
+  minimal (no empty `repos = []` / `[affinities]` noise) thanks to
+  `skip_serializing_if`; `state.toml` carries a header comment but
+  an empty body (every repo defaults until pinned).
 - [x] Manifest parsing and validation. `Manifest::try_load_from_workspace`
   with `Ok(None)` / `Ok(Some)` / `Err` semantics so a partially-initialised
   workspace (no manifest yet) is not an error. `git ws` shows the

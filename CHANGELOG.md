@@ -14,6 +14,28 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **`ws init`.** First workspace command that writes to disk.
+  Creates `<cwd>/.workspace/` with a starter `manifest.toml`
+  (`[workspace] name = "…" default_branch = "…"`) and an empty
+  `state.toml` carrying a header comment. Refuses to run when
+  the cwd is already inside a workspace (Invariant 8: Conservative
+  Defaults); `--force` overrides and overwrites the manifest +
+  state in place, leaving any other files in `.workspace/`
+  untouched.
+  - `--name <name>` / `--name=<name>`: workspace name. Default:
+    cwd basename.
+  - `--default-branch <branch>` / `--default-branch=<branch>`:
+    manifest's default branch. Default: `git config --get
+    init.defaultBranch`, then `"main"`. Aligns the workspace
+    default with what plain `git init` would have used.
+  - `--force`: overwrite existing manifest/state.
+- **`Manifest` serialisation tightened.** `repos` and `affinities`
+  gain `skip_serializing_if` so a freshly-`ws init`-ed manifest
+  is minimal — `[workspace]` block only, no empty arrays or
+  empty `[affinities]` table polluting the file. Round-trip
+  parsing is unchanged because `#[serde(default)]` rehydrates
+  the empty collections on read.
+
 - **State.toml parsing.** The Phase 0 scaffold of
   `src/workspace/state.rs` (parser + 3 unit tests) goes live in
   Slice C. New `StateDeclaration::try_load_from_workspace(root)`
