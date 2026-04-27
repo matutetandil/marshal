@@ -135,7 +135,12 @@ pub fn dispatch(args: &[OsString]) -> Result<ExitCode> {
             print_overview();
             Ok(ExitCode::from(0))
         }
-        Some("config") => crate::commands::config::dispatch(&args[1..]),
+        Some("config") => {
+            // Output format is `Human` until S4 wires the global
+            // `--json` flag; per Invariant 10, this is the only
+            // place the format is selected.
+            crate::commands::config::dispatch(&args[1..], OutputFormat::default())
+        }
         Some("what-now") => crate::commands::what_now::run(),
         Some(sub) => {
             eprintln!("marshal: unknown subcommand '{sub}'. Run 'git marshal' for the list.");
