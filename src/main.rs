@@ -79,9 +79,14 @@ fn main() -> ExitCode {
     // in the chain to identify itself. After git's own version line lands on
     // stdout, marshal prints its own. Guarded by `status.success()` so we
     // don't layer Marshal's line on top of a git failure.
+    //
+    // `capture_stderr = false` keeps stderr inherited and behaviour
+    // byte-for-byte identical to git. The 0.3.0 actionable error hints
+    // feature flips this to `true` once a hint registry is wired up — see
+    // `error_hints/` (added in a later step).
     let is_version_query = is_version_only_query(&parsed);
-    match commands::passthrough::run_returning_outcome(&forward) {
-        commands::passthrough::Outcome::Ran(status) => {
+    match commands::passthrough::run_returning_outcome(&forward, false) {
+        commands::passthrough::Outcome::Ran { status, .. } => {
             if is_version_query && status.success() {
                 println!("marshal version {}", env!("CARGO_PKG_VERSION"));
             }
