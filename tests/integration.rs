@@ -904,6 +904,165 @@ fn malformed_config_falls_back_to_defaults_with_a_warning() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `--json` global output flag
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `marshal --json config list` emits a parseable JSON object whose
+/// `entries` array carries every known key with its effective value.
+#[test]
+fn config_list_json_emits_parseable_payload() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .args(["marshal", "--json", "config", "list"])
+        .output()
+        .expect("run config list --json");
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    let entries = parsed["entries"].as_array().expect("entries is an array");
+    let keys: Vec<&str> = entries.iter().map(|e| e["key"].as_str().unwrap()).collect();
+    assert!(keys.contains(&"modernize.tips"));
+    assert!(keys.contains(&"modernize.rewrite"));
+    assert!(keys.contains(&"errors.actionable_hints"));
+}
+
+/// `config get` plain JSON form is `{key, value}` — no `origin`
+/// when `--show-origin` was not requested.
+#[test]
+fn config_get_json_omits_origin_without_show_origin() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .args(["marshal", "config", "get", "modernize.tips", "--json"])
+        .output()
+        .expect("run config get --json");
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["key"], "modernize.tips");
+    assert_eq!(parsed["value"], "true");
+    assert!(
+        parsed.get("origin").is_none(),
+        "origin must not appear without --show-origin, got: {parsed}"
+    );
+}
+
+/// `--show-origin` adds the `origin` field to the JSON payload —
+/// "default" when no layer has the key set, the layer name otherwise.
+#[test]
+fn config_get_json_includes_origin_with_show_origin() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .args([
+            "marshal",
+            "config",
+            "get",
+            "--show-origin",
+            "modernize.tips",
+            "--json",
+        ])
+        .output()
+        .expect("run config get --show-origin --json");
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["origin"], "default");
+    assert_eq!(parsed["value"], "true");
+}
+
+/// `marshal what-now --json` emits the advice as a JSON object with
+/// `rule_id`, `title`, and `suggestions[]`.
+#[test]
+fn what_now_json_emits_structured_advice() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let repo = init_git_repo();
+
+    // Seed a commit so the rule isn't `initial-state`.
+    std::fs::write(repo.path().join("seed.txt"), b"seed").unwrap();
+    StdCommand::new("git")
+        .current_dir(repo.path())
+        .args(["add", "seed.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(repo.path())
+        .args(["commit", "-q", "-m", "seed"])
+        .status()
+        .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(repo.path())
+        .args(["marshal", "what-now", "--json"])
+        .output()
+        .expect("run what-now --json");
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is valid JSON");
+    assert_eq!(parsed["rule_id"], "clean");
+    assert!(parsed["title"].as_str().unwrap().contains("clean"));
+    let suggestions = parsed["suggestions"].as_array().unwrap();
+    assert!(!suggestions.is_empty());
+}
+
+/// `--json` is global: it works equally before *or* after the
+/// subcommand. Position-independent so users place it where it
+/// reads best.
+#[test]
+fn json_flag_works_in_any_position() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    // Before the subcommand.
+    let before = marshal_with_isolated_config(&cfg_path)
+        .args(["marshal", "--json", "config", "list"])
+        .output()
+        .unwrap();
+    assert!(before.status.success());
+    let _: serde_json::Value = serde_json::from_slice(&before.stdout).unwrap();
+
+    // After the subcommand.
+    let after = marshal_with_isolated_config(&cfg_path)
+        .args(["marshal", "config", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(after.status.success());
+    let _: serde_json::Value = serde_json::from_slice(&after.stdout).unwrap();
+}
+
+/// Without `--json` the human form is preserved byte-exact —
+/// regression guard against the migration accidentally changing
+/// the default output shape.
+#[test]
+fn human_format_remains_default_when_json_not_set() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .args(["marshal", "config", "list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("modernize.tips=true"),
+        "default human form should keep `key=value` lines, got: {stdout}"
+    );
+    // And it must NOT be JSON.
+    assert!(
+        !stdout.trim_start().starts_with('{'),
+        "default form must not be JSON, got: {stdout}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal what-now`
 // ───────────────────────────────────────────────────────────────────────────
 

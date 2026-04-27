@@ -10,13 +10,11 @@
 //!    body.
 //!
 //! 2. The [`dispatch`] entry point routing argv after the literal
-//!    `marshal` token to either the marshal-namespace overview or a
-//!    concrete command. As of step S1 the existing
-//!    `commands::config::dispatch` and `commands::what_now::run`
-//!    paths still own their own argv parsing — the migration to
-//!    `Command` happens command-by-command in S2 and S3, then
-//!    `--json` lights up centrally in S4 with no further per-command
-//!    changes.
+//!    `marshal` token. It is the only place the active output
+//!    format is selected: `--json` (anywhere in argv) flips the
+//!    [`OutputFormat`] to `Json`; the format then flows through
+//!    `run_command` to the dispatcher's chosen `Command`, which
+//!    is invariant to it. Concrete commands never see `--json`.
 
 use anyhow::Result;
 use serde::Serialize;
@@ -33,10 +31,6 @@ use std::process::ExitCode;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
     Human,
-    /// Constructed in S4 once `--json` lights up in the dispatcher.
-    /// Already plumbed through `write_output` in S1 so the JSON
-    /// path is exercised by unit tests from day one.
-    #[allow(dead_code)]
     Json,
 }
 
@@ -88,10 +82,6 @@ pub trait Command {
 /// stdout. The dispatcher uses this once a concrete `Command`
 /// impl is selected. Errors from `Command::run` and I/O errors
 /// from rendering both propagate.
-///
-/// Silenced until S2 migrates the first command to use it. The
-/// scaffolding lands in S1 so the contract and tests are in place.
-#[allow(dead_code)]
 pub fn run_command<C: Command>(
     cmd: C,
     args: &[OsString],
@@ -107,7 +97,6 @@ pub fn run_command<C: Command>(
 /// Test seam: render `output` to an arbitrary writer rather than
 /// stdout. Used by [`run_command`] internally and by unit tests
 /// that need to assert against the bytes produced.
-#[allow(dead_code)]
 fn write_output<R: Renderable + Serialize>(
     output: &R,
     format: OutputFormat,
@@ -129,28 +118,54 @@ fn write_output<R: Renderable + Serialize>(
 // ── Dispatcher ────────────────────────────────────────────────────
 
 /// Dispatch the argv that came *after* the literal `marshal` token.
+///
+/// `--json` is a global flag accepted anywhere in argv. It is
+/// stripped here and the active [`OutputFormat`] is threaded into
+/// every subcommand. Per Invariant 10, this is the *only* place
+/// where the format is selected — concrete `Command` impls and
+/// their sub-dispatchers receive a format and obey it; they do not
+/// know about `--json` itself.
 pub fn dispatch(args: &[OsString]) -> Result<ExitCode> {
+    let (format, args) = extract_json_flag(args);
+    let args = args.as_slice();
     match args.first().and_then(|s| s.to_str()) {
         None => {
             print_overview();
             Ok(ExitCode::from(0))
         }
-        Some("config") => {
-            // Output format is `Human` until S4 wires the global
-            // `--json` flag; per Invariant 10, this is the only
-            // place the format is selected.
-            crate::commands::config::dispatch(&args[1..], OutputFormat::default())
-        }
-        Some("what-now") => run_command(
-            crate::commands::what_now::WhatNow,
-            &args[1..],
-            OutputFormat::default(),
-        ),
+        Some("config") => crate::commands::config::dispatch(&args[1..], format),
+        Some("what-now") => run_command(crate::commands::what_now::WhatNow, &args[1..], format),
         Some(sub) => {
             eprintln!("marshal: unknown subcommand '{sub}'. Run 'git marshal' for the list.");
             Ok(ExitCode::from(2))
         }
     }
+}
+
+/// Strip `--json` from `args` (anywhere in the slice — global flag
+/// semantics), and return the active output format alongside the
+/// filtered argv. Accepting `--json` in any position lets the user
+/// place it where it reads best for them
+/// (`marshal --json config list` or `marshal config list --json`)
+/// without forcing a positional convention.
+fn extract_json_flag(args: &[OsString]) -> (OutputFormat, Vec<OsString>) {
+    use std::ffi::OsStr;
+    let target = OsStr::new("--json");
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut json = false;
+    for arg in args {
+        if arg.as_os_str() == target {
+            json = true;
+        } else {
+            filtered.push(arg.clone());
+        }
+    }
+    let format = if json {
+        OutputFormat::Json
+    } else {
+        OutputFormat::Human
+    };
+    (format, filtered)
 }
 
 fn print_overview() {
