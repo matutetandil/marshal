@@ -14,6 +14,36 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **Scope inference engine.** The Phase 0 scaffold of
+  `src/workspace/scope.rs` (5 dimensions, 7 predefined policies,
+  `infer()` with 3 unit tests) goes live in Slice H. New
+  `scope::resolve()` is the single entry point every workspace
+  command uses to compute "which repos do I operate on?" — it
+  captures both the `--on <name>` declared-scope override (with
+  manifest validation) and the fall-through to the command's
+  policy via `infer()`. `Material`, `Temporal`, and `Structural`
+  dimensions and their policy constructors stay
+  `#[allow(dead_code)]` until the Phase 3+ commands that consume
+  them ship.
+- **Global `--on <name>` flag** on the `ws` namespace. Mirrors the
+  shape of `--json` / `--all`: extracted in `cli::dispatch_ws`,
+  stripped from argv, threaded to each workspace Command via a
+  dedicated `on: Option<String>` field. Supports both
+  `--on <value>` (separated) and `--on=<value>` (equals) forms;
+  rejects empty values and repeated flags. Validated against the
+  manifest's declared repos before running so a typo errors out
+  with the list of known names.
+- **`ws log` spatial inference.** Without `--on`, `ws log` now
+  obeys the spatial-fallback policy: when invoked from inside a
+  child repo (cwd matches `<root>/src/<name>/…`), the log narrows
+  to that one repo. From the workspace root or a sibling
+  directory, the log stays workspace-wide. `--on <name>`
+  overrides spatial, even from inside a child.
+- **`ws status` and `ws diff` accept `--on <name>`** as a
+  declared-scope filter. Status filters its repos list to one
+  entry; diff filters the change list to entries matching that
+  name.
+
 - **`ws diff`.** Third aggregated read-only command. Compares the
   working-tree `state.toml` against the version at `HEAD` and
   translates the difference into per-repo "added / removed /

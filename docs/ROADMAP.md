@@ -130,7 +130,16 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   file diffs of manifest.toml / Dockerfile / README are intentionally
   left to `cd <root> && git diff` — Marshal only reimplements the
   bits where domain interpretation adds value over plain git output.
-- [ ] Scope inference engine
+- [x] Scope inference engine. The Phase 0 scaffold of
+  `src/workspace/scope.rs` (5 dimensions, 7 policies, the `infer()`
+  function) is live, fed by a thin `resolve()` entry point that
+  encapsulates the `--on <name>` declared-scope override and the
+  fall-through to the command's policy. `ws log` uses
+  `spatial_fallback` (narrows to current repo when inside one);
+  `ws status` and `ws diff` use `full_workspace` (no spatial,
+  but `--on` still filters). Material/Temporal/Structural
+  dimensions and their policy constructors are scaffolded for
+  Phase 3+ commands.
 - [ ] `--explain` flag implementation
 
 **Deliverable:** developers can clone a workspace and see its state clearly. No modifications yet.
