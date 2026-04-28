@@ -140,7 +140,15 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   but `--on` still filters). Material/Temporal/Structural
   dimensions and their policy constructors are scaffolded for
   Phase 3+ commands.
-- [ ] `--explain` flag implementation
+- [x] `--explain` flag implementation. Global flag on the `ws`
+  namespace; every workspace command (`init`, `status`, `log`,
+  `diff`) shows its plan — exact `git -C <path> …` invocations
+  or filesystem operations — without running them. Closes the
+  architectural promise from Invariant 6. JSON form carries the
+  plan in an `explain_plan` field. Marshal namespace commands
+  are intentionally out of scope (they are metadata/render
+  rather than coordinated operations); extend later if one grows
+  into a workspace operation.
 
 **Deliverable:** developers can clone a workspace and see its state clearly. No modifications yet.
 

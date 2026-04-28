@@ -14,6 +14,35 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **`--explain` flag** on every workspace command. Closes the
+  architectural promise from PRINCIPLES.md Invariant 6
+  (Explainable Operations): every operation can show its plan —
+  the exact Git commands or filesystem operations it would
+  perform — without performing them. Implementation:
+  - Global flag extracted in `cli::dispatch_ws`, stripped from
+    argv, set as a `bool` on each `Command` struct.
+  - Each Output type gains an
+    `explain_plan: Option<Vec<String>>`; the renderer routes to
+    a shared "Plan for `ws <…>`:" + numbered-steps format when
+    the field is populated.
+  - `ws init --explain` lists what it would create and **does
+    not write anything** (the safety property — explain is a
+    dry run, not a "show then run" preview).
+  - `ws status --explain` enumerates the per-repo
+    `rev-parse --git-dir` and `status --porcelain=v2 --branch`
+    invocations. Honours `--on` to narrow the plan.
+  - `ws log --explain` lists the per-repo `git log` invocation
+    with the cap (`-n N`) visible.
+  - `ws diff --explain` describes the workspace-side state.toml
+    read and the `git show HEAD:.workspace/state.toml` baseline
+    fetch.
+  - JSON form carries `explain_plan` under --explain (skipped
+    otherwise — machine consumers can branch on its presence).
+  - Marshal namespace commands (`config`, `help`, `what-now`)
+    are not covered by `--explain` in this slice — those are
+    metadata/render rather than coordinated operations. Will
+    extend if a marshal command grows into one.
+
 - **Scope inference engine.** The Phase 0 scaffold of
   `src/workspace/scope.rs` (5 dimensions, 7 predefined policies,
   `infer()` with 3 unit tests) goes live in Slice H. New
