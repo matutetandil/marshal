@@ -34,6 +34,7 @@ use crate::context;
 use crate::workspace::manifest::Manifest;
 use crate::workspace::state::StateDeclaration;
 
+mod diff;
 mod init;
 mod log;
 mod status;
@@ -56,13 +57,16 @@ pub fn dispatch(args: &[OsString], all: bool, format: OutputFormat) -> Result<Ex
         Some("status") => run_command(status::WsStatus { all }, &args[1..], format),
         // `git ws log` — aggregated commit log across child repos.
         Some("log") => run_command(log::WsLog { all }, &args[1..], format),
+        // `git ws diff` — semantic interpretation of state.toml changes.
+        Some("diff") => run_command(diff::WsDiff, &args[1..], format),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
                  Run `git ws` for the workspace context, `git ws init` \
-                 to create one, `git ws status` for the aggregated state, \
-                 or `git ws log` for cross-repo activity. More subcommands \
-                 arrive in Phase 2 — see ROADMAP.md."
+                 to create one, `git ws status` for aggregated state, \
+                 `git ws log` for cross-repo activity, or `git ws diff` \
+                 for state-declaration changes. More subcommands arrive \
+                 in Phase 2 — see ROADMAP.md."
             );
             Ok(ExitCode::from(2))
         }

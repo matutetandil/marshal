@@ -2185,6 +2185,261 @@ fn ws_log_rejects_unknown_flag() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `ws diff`
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Helper: prepare a workspace as a committed git repo. Returns the
+/// TempDir holding the workspace root. After the helper, the repo
+/// has one commit with `.workspace/{manifest.toml, state.toml}`
+/// committed; `state.toml` is the one passed in.
+fn make_committed_workspace(state_toml: &str, manifest_toml: &str) -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    StdCommand::new("git")
+        .current_dir(root)
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(root)
+        .args(["config", "user.email", "t@example.com"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(root)
+        .args(["config", "user.name", "Test"])
+        .status()
+        .unwrap();
+    let workspace_dir = root.join(".workspace");
+    std::fs::create_dir(&workspace_dir).unwrap();
+    std::fs::write(workspace_dir.join("manifest.toml"), manifest_toml).unwrap();
+    std::fs::write(workspace_dir.join("state.toml"), state_toml).unwrap();
+    StdCommand::new("git")
+        .current_dir(root)
+        .args(["add", "."])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(root)
+        .args(["commit", "-q", "-m", "initial"])
+        .status()
+        .unwrap();
+    tmp
+}
+
+/// `ws diff` outside a workspace fails with the same shape as `ws status`.
+#[test]
+fn ws_diff_outside_workspace_fails() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let outside = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(outside.path())
+        .args(["ws", "diff"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not in a marshal workspace"));
+}
+
+/// Workspace with no manifest yet: same error shape as the other
+/// aggregated commands.
+#[test]
+fn ws_diff_without_manifest_errors_helpfully() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "diff"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("has no manifest yet") || stderr.contains("ws init"),
+        "expected manifest-missing hint, got: {stderr}"
+    );
+}
+
+/// state.toml unchanged since HEAD → "No state declarations changed".
+#[test]
+fn ws_diff_reports_no_changes_when_state_matches_head() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_committed_workspace(
+        r#"[repos."alpha"]
+branch = "main"
+"#,
+        r#"[workspace]
+name = "demo"
+default_branch = "main"
+"#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "diff"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No state declarations changed since HEAD"),
+        "expected no-changes message, got: {stdout}"
+    );
+}
+
+/// Three change kinds in one diff: changed, removed, added.
+#[test]
+fn ws_diff_renders_changed_added_and_removed() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_committed_workspace(
+        r#"[repos."alpha"]
+branch = "main"
+
+[repos."beta"]
+branch = "main"
+"#,
+        r#"[workspace]
+name = "demo"
+"#,
+    );
+    // Modify the working-tree state.toml: alpha branch changes,
+    // beta is dropped, gamma is new.
+    std::fs::write(
+        ws.path().join(".workspace").join("state.toml"),
+        r#"[repos."alpha"]
+branch = "feat/x"
+
+[repos."gamma"]
+branch = "feat/api"
+"#,
+    )
+    .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "diff"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Symbols + names — sorted alphabetically.
+    assert!(
+        stdout.contains("~ alpha"),
+        "expected changed line for alpha, got: {stdout}"
+    );
+    assert!(stdout.contains("`main` → `feat/x`"));
+    assert!(
+        stdout.contains("- beta"),
+        "expected removed line for beta, got: {stdout}"
+    );
+    assert!(stdout.contains("declaration removed"));
+    assert!(
+        stdout.contains("+ gamma"),
+        "expected added line for gamma, got: {stdout}"
+    );
+    assert!(stdout.contains("declared on `feat/api`"));
+}
+
+/// JSON form: the tagged-enum shape (`kind` + per-variant fields).
+#[test]
+fn ws_diff_json_emits_tagged_change_entries() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_committed_workspace(
+        r#"[repos."alpha"]
+branch = "main"
+"#,
+        r#"[workspace]
+name = "demo"
+"#,
+    );
+    std::fs::write(
+        ws.path().join(".workspace").join("state.toml"),
+        r#"[repos."alpha"]
+branch = "feat/x"
+
+[repos."beta"]
+branch = "main"
+"#,
+    )
+    .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "diff", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["workspace"]["name"], "demo");
+    let changes = parsed["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 2);
+
+    // Sorted alphabetically: alpha (changed) then beta (added).
+    assert_eq!(changes[0]["kind"], "changed");
+    assert_eq!(changes[0]["name"], "alpha");
+    assert_eq!(changes[0]["from"], "main");
+    assert_eq!(changes[0]["to"], "feat/x");
+
+    assert_eq!(changes[1]["kind"], "added");
+    assert_eq!(changes[1]["name"], "beta");
+    assert_eq!(changes[1]["branch"], "main");
+}
+
+/// Workspace with no commits yet (no HEAD): every state.toml entry
+/// reads as an addition. Demonstrates the graceful-degrade path
+/// for `git show HEAD:.workspace/state.toml` failure.
+#[test]
+fn ws_diff_treats_no_head_as_empty_baseline() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    // Create a workspace inside a NON-committed git repo: init,
+    // ws init, but no `git commit`. HEAD does not exist yet.
+    let tmp = TempDir::new().unwrap();
+    StdCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+    let workspace_dir = tmp.path().join(".workspace");
+    std::fs::create_dir(&workspace_dir).unwrap();
+    std::fs::write(
+        workspace_dir.join("manifest.toml"),
+        r#"[workspace]
+name = "demo"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        workspace_dir.join("state.toml"),
+        r#"[repos."alpha"]
+branch = "main"
+"#,
+    )
+    .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(tmp.path())
+        .args(["ws", "diff"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("+ alpha"),
+        "expected alpha as added (no HEAD baseline), got: {stdout}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal help`
 // ───────────────────────────────────────────────────────────────────────────
 
