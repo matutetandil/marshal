@@ -7,11 +7,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
-the three zones: declared / staged / working). First slice shipped:
-the per-developer staging area with `ws stage` and `ws unstage`.
-Next: `ws status` integration, `ws restore`, `ws reset`, `ws commit`,
-`ws branch`, `ws switch`, plus the pre-flight + parallel-execution
-frameworks. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+the three zones: declared / staged / working). Two slices shipped:
+the per-developer staging area (`ws stage` / `ws unstage`) and
+its surfacing through `ws status`. Next: `ws restore`, `ws reset`,
+`ws commit`, `ws branch`, `ws switch`, plus the pre-flight +
+parallel-execution frameworks. See
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- **`ws status` surfaces the staging zone (Slice B).** When a repo
+  has a staging entry in `.workspace/local/staged.toml`, the
+  per-repo line gains a "staged at `<branch>`@<sha7>" segment, and
+  a footer summary "X repo(s) staged for commit. Run `ws commit`
+  to flush staged → state.toml." appears whenever staging is
+  non-empty. Staged repos are always interesting (never collapsed
+  under hide-boring), even when the working state would otherwise
+  read as boring — the user is mid-flight on a workspace commit
+  and should see what is queued.
+
+  - **Drift detection.** When a staged snapshot's `(branch, commit)`
+    no longer matches the working state, the per-repo line gains
+    "(drifted from working)" and a footer sub-line spells out the
+    implication: the commit will record the staged values; re-run
+    `ws stage` to refresh. Drift is **not** a bug — it is the
+    snapshot semantics working as designed (deploy-manifest
+    atomicity), made visible.
+  - **JSON shape.** `RepoStatus` gains `staging: Option<RepoStaged>`
+    and `staging_drifted: bool`. Both use `skip_serializing_if`, so
+    machine consumers see the fields only when they apply.
+  - **`--explain` plan** gains a leading "read `.workspace/local/
+    staged.toml`" step so the dry-run output reflects the full set
+    of inputs.
+
+- **`BranchInfo.oid: Option<String>`.** Porcelain v2 already emitted
+  `# branch.oid <hash>` but the parser only used it to detect
+  `(initial)`. The hash is now captured. Two consequences:
+  - `ws stage` reads HEAD's commit from the porcelain output
+    directly — one shellout less per stage (no separate
+    `git rev-parse HEAD`).
+  - `ws status` can compare staging snapshots against the working
+    state's `(branch.name, branch.oid)` to compute drift without
+    extra shellouts.
 
 ### Added
 

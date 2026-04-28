@@ -123,7 +123,13 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   extractor), reconciles the on-disk state against the manifest +
   state.toml's declared branch, and renders with the universal
   hide-boring pattern. `--all` expands; JSON form returns the full
-  per-repo payload.
+  per-repo payload. **Phase 3 / Slice B extension:** the staging
+  zone (`.workspace/local/staged.toml`) is also surfaced. Each repo
+  with a staging entry shows a "staged at `<branch>`@<sha>" segment,
+  is excluded from hide-boring (always interesting), and contributes
+  to a footer "X repos staged for commit." Drift between the staged
+  snapshot and the current working state is flagged informationally —
+  a deliberate consequence of the snapshot semantics, not a bug.
 - [x] Workspace log: aggregated cross-repo activity. `git ws log`
   walks every declared repo, fetches per-line tab-separated entries
   via `git -C <path> log --pretty=…`, sorts by descending ISO author
