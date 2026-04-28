@@ -162,12 +162,31 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
 
 **Deliverable:** developers can clone a workspace and see its state clearly. No modifications yet.
 
-## Phase 3: Workspace Modifications — The Three Zones
+## Phase 3: Workspace Modifications — The Three Zones — 🟡 first slice shipped
 
 **Goal:** full workspace CRUD with staging model.
 
-- [ ] `ws stage <repo>` — mark divergence for inclusion in next workspace commit
-- [ ] `ws unstage <repo>` — remove from staging
+The three zones, mental model:
+- **Working** — what every child repo's HEAD actually is right now.
+- **Staged** — `.workspace/local/staged.toml`, populated by `ws stage`.
+  Per-repo `(branch, commit)` snapshots taken at stage time
+  (`git add`-style: re-staging refreshes the snapshot, drift in
+  working trees does not propagate). Per-developer, gitignored.
+- **Declared** — `.workspace/state.toml`, the committed source-of-
+  truth. Updated by `ws commit` (flushes staged into declared and
+  clears staged).
+
+- [x] `ws stage <repo>` — capture the child's `(branch, commit)`
+  into `.workspace/local/staged.toml` at stage time. Refuses clean
+  on detached HEAD or initial-empty repos (no stable snapshot
+  available). Re-staging an already-staged repo overwrites with
+  the current snapshot, surfaced as "(was branch@commit)" in the
+  human form and in the JSON `previous_snapshot` field. The
+  per-developer `local/` directory is gitignored automatically on
+  first stage.
+- [x] `ws unstage <repo>` — drop the entry from `staged.toml`.
+  Idempotent: unstaging a never-staged repo is a no-op, not an
+  error.
 - [ ] `ws restore <repo>` — return repo to declared state
 - [ ] `ws reset` — clear staging
 - [ ] `ws commit` — commit staged changes as new state.toml in workspace repo

@@ -6,8 +6,70 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-No unreleased work yet. The next cycle opens Phase 3 — workspace
-modifications (the three zones: declared, staged, working).
+Work in progress on `0.5.0` — Phase 3 (workspace modifications,
+the three zones: declared / staged / working). First slice shipped:
+the per-developer staging area with `ws stage` and `ws unstage`.
+Next: `ws status` integration, `ws restore`, `ws reset`, `ws commit`,
+`ws branch`, `ws switch`, plus the pre-flight + parallel-execution
+frameworks. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- **`ws stage <repo>` / `ws unstage <repo>`.** First Phase 3 slice:
+  per-developer staging area, the workspace's equivalent of git's
+  index. `ws stage` captures the child repo's `(branch, commit)`
+  *at stage time* and writes it to `.workspace/local/staged.toml`;
+  `ws unstage` drops the entry. `ws commit` (a later slice) will
+  flush staged entries into `state.toml` and clear the staging
+  file.
+
+  The snapshot semantics — chosen explicitly over the simpler
+  "mark-only, snapshot at commit" model — protect deploy-manifest
+  atomicity: what the user tested as a coordinated set across repos
+  is exactly what gets committed, even if working trees drift
+  between stage and commit. Re-staging a repo overwrites the
+  previous snapshot, mirroring how `git add` re-stages a file's
+  current content.
+
+  - **Validation.** Both commands validate the repo against the
+    manifest with the same shape as `--on bogus`: a typo errors
+    out cleanly with the list of known names.
+  - **Degenerate child states are refused with a recovery hint.**
+    `ws stage` fails clearly when the child repo has no commits
+    yet (initial-empty) or is on detached HEAD — both are states
+    that staging cannot represent because they do not produce a
+    stable `(branch, commit)` pair a deploy manifest could pin.
+  - **Idempotent unstage.** `ws unstage <never-staged-repo>` is a
+    no-op rather than an error, mirroring how
+    `git restore --staged <unstaged-path>` behaves benignly.
+  - **Per-developer `local/` is gitignored automatically.** The
+    first time `staged.toml` is written, marshal seeds
+    `.workspace/local/.gitignore` with `*` so per-developer
+    staging never accidentally lands in the workspace repo's
+    history. Idempotent — a customised `.gitignore` is never
+    overwritten.
+  - **Header comment in `staged.toml`.** A user who opens the file
+    directly sees what it is for and what entries look like.
+  - `--explain` and `--json` work via the existing namespace globals.
+
+- **`StagedDeclaration`** in `src/workspace/staged.rs`. Mirrors
+  `state.rs` structurally (`HashMap<String, RepoStaged>`) but
+  `RepoStaged.commit` is **required** (vs optional in `state.toml`)
+  — a snapshot must be reproducible. Three-way load semantics
+  match the manifest and state loaders: `Ok(None)` on missing,
+  `Ok(Some)` on loaded, `Err` on malformed. `save_to_workspace`
+  creates `.workspace/local/`, seeds the gitignore, and writes
+  `staged.toml` (header + body) atomically per call.
+
+### Changed
+
+- `LOCAL_DIR` and `git::rev_parse` lose their
+  `#[allow(dead_code)]` — both have real consumers now (the new
+  staging slice). `commands::ws::staged::{get, is_empty}` keep
+  individual `#[allow(dead_code)]` until Slice B (`ws status`
+  integration) and Slice E (`ws commit`) consume them.
+- The `ws` unknown-subcommand hint mentions `stage` and `unstage`
+  alongside the existing subcommands.
 
 ## [0.4.0] — 2026-04-28
 
