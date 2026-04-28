@@ -33,7 +33,9 @@ const STATE_FILE_HEADER: &str = "\
 #   commit = \"<optional-sha>\"
 ";
 
-pub struct WsInit;
+pub struct WsInit {
+    pub explain: bool,
+}
 
 impl Command for WsInit {
     type Output = WsInitOutput;
@@ -42,6 +44,8 @@ impl Command for WsInit {
         let parsed = parse_args(args)?;
 
         // Refuse if already inside a workspace, unless --force.
+        // We still run this check under --explain so the user sees
+        // the same error they'd get without it.
         if !parsed.force {
             if let Some(ctx) = context::detect()? {
                 bail!(
@@ -73,14 +77,12 @@ impl Command for WsInit {
             .clone()
             .unwrap_or_else(detect_init_default_branch);
 
-        // Build and write the manifest.
+        // Build the manifest in memory. Used in both branches:
+        // for --explain we surface its serialised size; for the
+        // real run we write it to disk.
         let workspace_dir = cwd.join(WORKSPACE_MARKER);
-        fs::create_dir_all(&workspace_dir).with_context(|| {
-            format!(
-                "failed to create workspace directory at {}",
-                workspace_dir.display()
-            )
-        })?;
+        let manifest_path = workspace_dir.join(MANIFEST_FILE);
+        let state_path = workspace_dir.join(STATE_FILE);
 
         let manifest = Manifest {
             workspace: WorkspaceMeta {
@@ -92,14 +94,50 @@ impl Command for WsInit {
         };
         let manifest_toml =
             toml::to_string_pretty(&manifest).context("failed to serialise manifest")?;
-        let manifest_path = workspace_dir.join(MANIFEST_FILE);
+
+        // --explain: list what we *would* do, without doing it.
+        if self.explain {
+            let plan = vec![
+                format!("create directory `{}`", workspace_dir.display()),
+                format!(
+                    "write `{}` ({} bytes — workspace name `{}`, default branch `{}`)",
+                    manifest_path.display(),
+                    manifest_toml.len(),
+                    workspace_name,
+                    default_branch
+                ),
+                format!(
+                    "write `{}` ({} bytes — header comment + empty body)",
+                    state_path.display(),
+                    STATE_FILE_HEADER.len()
+                ),
+            ];
+            return Ok(WsInitOutput {
+                root: cwd.to_string_lossy().into_owned(),
+                workspace_name,
+                default_branch,
+                created_files: vec![
+                    format!("{WORKSPACE_MARKER}/{MANIFEST_FILE}"),
+                    format!("{WORKSPACE_MARKER}/{STATE_FILE}"),
+                ],
+                forced: parsed.force,
+                explain_plan: Some(plan),
+            });
+        }
+
+        // Real run: create the directory and write the files.
+        fs::create_dir_all(&workspace_dir).with_context(|| {
+            format!(
+                "failed to create workspace directory at {}",
+                workspace_dir.display()
+            )
+        })?;
         fs::write(&manifest_path, manifest_toml)
             .with_context(|| format!("failed to write manifest at {}", manifest_path.display()))?;
 
         // Write `state.toml` with a header comment. An empty TOML
         // body is intentional: every repo defaults to the manifest's
         // default branch until the user pins one explicitly.
-        let state_path = workspace_dir.join(STATE_FILE);
         fs::write(&state_path, STATE_FILE_HEADER).with_context(|| {
             format!(
                 "failed to write state declaration at {}",
@@ -116,6 +154,7 @@ impl Command for WsInit {
                 format!("{WORKSPACE_MARKER}/{STATE_FILE}"),
             ],
             forced: parsed.force,
+            explain_plan: None,
         })
     }
 }
@@ -125,17 +164,26 @@ pub struct WsInitOutput {
     pub root: String,
     pub workspace_name: String,
     pub default_branch: String,
-    /// Paths (relative to `root`) of files marshal wrote during
-    /// this init. Useful for tooling that wants to git-add them.
+    /// Paths (relative to `root`) of files marshal wrote (or
+    /// would have written, under `--explain`) during this init.
     pub created_files: Vec<String>,
     /// `true` when `--force` was used to overwrite an existing
     /// workspace's manifest/state. JSON consumers can branch on
     /// this; humans see a different headline.
     pub forced: bool,
+    /// `Some(plan)` when `--explain` was set — the steps marshal
+    /// would have performed, none of which actually ran. JSON
+    /// drops the field when the command ran for real.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explain_plan: Option<Vec<String>>,
 }
 
 impl Renderable for WsInitOutput {
     fn render_human(&self, w: &mut dyn Write) -> io::Result<()> {
+        if let Some(plan) = &self.explain_plan {
+            return super::render_explain_plan(w, "ws init", plan);
+        }
+
         let action = if self.forced {
             "Re-initialised"
         } else {

@@ -146,18 +146,19 @@ pub fn dispatch_marshal(args: &[OsString]) -> Result<ExitCode> {
 /// Dispatch the argv that came *after* the literal `ws` token.
 ///
 /// Sibling to [`dispatch_marshal`] — separate top-level namespace
-/// for workspace operations. `--json`, `--all`, and `--on <name>`
-/// are extracted here and threaded to every workspace subcommand.
-/// `--on` is the "declared scope" override from ARCHITECTURE.md's
-/// scope-inference model: the user explicitly names the repo to
-/// operate on. Without it, each command falls back to its own
-/// scope policy (spatial for `ws log`, full-workspace for `ws
-/// status` and `ws diff`).
+/// for workspace operations. `--json`, `--all`, `--on <name>`, and
+/// `--explain` are extracted here and threaded to every workspace
+/// subcommand. `--on` is the "declared scope" override from
+/// ARCHITECTURE.md's scope-inference model. `--explain` (Invariant
+/// 6: Explainable Operations) flips every command into plan-only
+/// mode: it shows the git commands or filesystem operations it
+/// would perform, without performing them.
 pub fn dispatch_ws(args: &[OsString]) -> Result<ExitCode> {
     let (format, args) = extract_json_flag(args);
     let (all, args) = extract_all_flag(&args);
+    let (explain, args) = extract_explain_flag(&args);
     let (on, args) = extract_on_flag(&args)?;
-    crate::commands::ws::dispatch(args.as_slice(), all, on, format)
+    crate::commands::ws::dispatch(args.as_slice(), all, on, explain, format)
 }
 
 /// Strip `--all` from `args` (anywhere in the slice — global flag
@@ -177,6 +178,25 @@ fn extract_all_flag(args: &[OsString]) -> (bool, Vec<OsString>) {
         }
     }
     (all, filtered)
+}
+
+/// Strip `--explain` from `args` (anywhere in the slice — global
+/// flag semantics, same shape as `--all`). Used by [`dispatch_ws`]
+/// to flip every workspace command into plan-only mode (Invariant
+/// 6: Explainable Operations).
+fn extract_explain_flag(args: &[OsString]) -> (bool, Vec<OsString>) {
+    use std::ffi::OsStr;
+    let target = OsStr::new("--explain");
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut explain = false;
+    for arg in args {
+        if arg.as_os_str() == target {
+            explain = true;
+        } else {
+            filtered.push(arg.clone());
+        }
+    }
+    (explain, filtered)
 }
 
 /// Strip `--on <name>` (or `--on=<name>`) from `args`, returning

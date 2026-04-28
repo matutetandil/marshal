@@ -49,6 +49,9 @@ pub struct WsLog {
     /// child repo (cwd matches `<root>/src/<name>/…`), narrow the
     /// log to that one. Otherwise the full workspace.
     pub on: Option<String>,
+    /// `--explain` from the dispatcher — list the `git -C <path> log …`
+    /// invocations the command would run, without running them.
+    pub explain: bool,
 }
 
 impl Command for WsLog {
@@ -94,6 +97,39 @@ impl Command for WsLog {
             ctx.current_repo.as_deref(),
             ScopePolicy::spatial_fallback(),
         )?;
+
+        // --explain: list every git invocation we would run.
+        if self.explain {
+            let mut plan = Vec::new();
+            let limit_part = match per_repo_limit {
+                Some(n) => format!(" -n{n}"),
+                None => String::new(),
+            };
+            for repo in manifest.repos.iter().filter(|r| scope.contains(&r.name)) {
+                let rel_path = repo
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| format!("src/{}", repo.name));
+                let abs = ctx.root.join(&rel_path);
+                plan.push(format!(
+                    "git -C {} log --pretty=format:%H%x09%aI%x09%an%x09%s{limit_part}",
+                    abs.display()
+                ));
+            }
+            return Ok(WsLogOutput {
+                workspace: WorkspaceInfo {
+                    root: ctx.root.to_string_lossy().into_owned(),
+                    name: manifest.workspace.name.clone(),
+                    total_repos_declared: manifest.repos.len(),
+                    repos_with_data: 0,
+                },
+                entries: Vec::new(),
+                sampled: 0,
+                limit_applied: per_repo_limit,
+                all: self.all,
+                explain_plan: Some(plan),
+            });
+        }
 
         // Fetch every in-scope repo's recent commits (skip missing).
         let mut entries: Vec<LogEntry> = Vec::new();
@@ -154,6 +190,7 @@ impl Command for WsLog {
             sampled,
             limit_applied: per_repo_limit,
             all: self.all,
+            explain_plan: None,
         })
     }
 }
@@ -241,6 +278,11 @@ pub struct WsLogOutput {
     /// shown). Excluded from JSON.
     #[serde(skip)]
     pub all: bool,
+
+    /// `Some(plan)` when `--explain` was set. Other fields are
+    /// empty/zero in that case; the renderer surfaces the plan.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explain_plan: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -267,6 +309,10 @@ pub struct LogEntry {
 
 impl Renderable for WsLogOutput {
     fn render_human(&self, w: &mut dyn Write) -> io::Result<()> {
+        if let Some(plan) = &self.explain_plan {
+            return super::render_explain_plan(w, "ws log", plan);
+        }
+
         writeln!(
             w,
             "Workspace `{}` — recent activity across {} of {} repos",

@@ -46,46 +46,52 @@ const ABBREVIATE_THRESHOLD: usize = 5;
 
 /// Entry point invoked by `cli::dispatch_ws` when the user types
 /// `git ws <…>`. Receives every arg past the literal `ws` token,
-/// plus the global flags (`--all`, `--on <name>`) and the active
-/// output format.
+/// plus the global flags (`--all`, `--on <name>`, `--explain`) and
+/// the active output format.
 pub fn dispatch(
     args: &[OsString],
     all: bool,
     on: Option<String>,
+    explain: bool,
     format: OutputFormat,
 ) -> Result<ExitCode> {
     match args.first().and_then(|s| s.to_str()) {
         // Bare `git ws` — print the current workspace context.
-        // Doesn't consult --on (it's a context display, not an
-        // operation across repos).
+        // Doesn't consult --on or --explain (it's a context display,
+        // not an operation across repos).
         None => run_command(WsContextInfo { all }, args, format),
         // `git ws init` — create a `.workspace/` directory here.
-        // Doesn't consult --on either; it operates on the cwd.
-        Some("init") => run_command(init::WsInit, &args[1..], format),
-        // `git ws status` — aggregated read-only view. Honours
-        // `--on` as a declared-scope filter.
+        // Honours --explain (skip the writes, list them).
+        Some("init") => run_command(init::WsInit { explain }, &args[1..], format),
+        // `git ws status` — aggregated read-only view.
         Some("status") => run_command(
             status::WsStatus {
                 all,
                 on: on.clone(),
+                explain,
             },
             &args[1..],
             format,
         ),
-        // `git ws log` — aggregated commit log. Spatial-fallback
-        // policy when `--on` is absent (inside a child repo, scope
-        // narrows to that repo).
+        // `git ws log` — aggregated commit log.
         Some("log") => run_command(
             log::WsLog {
                 all,
                 on: on.clone(),
+                explain,
             },
             &args[1..],
             format,
         ),
-        // `git ws diff` — semantic state.toml changes. Honours
-        // `--on` as a declared-scope filter on the change list.
-        Some("diff") => run_command(diff::WsDiff { on: on.clone() }, &args[1..], format),
+        // `git ws diff` — semantic state.toml changes.
+        Some("diff") => run_command(
+            diff::WsDiff {
+                on: on.clone(),
+                explain,
+            },
+            &args[1..],
+            format,
+        ),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
@@ -98,6 +104,32 @@ pub fn dispatch(
             Ok(ExitCode::from(2))
         }
     }
+}
+
+/// Shared helper used by every ws command's renderer when
+/// `--explain` is set. Renders the plan as a numbered list under
+/// a "Plan for `<command>`:" heading. Centralised so each command
+/// gets the same shape without duplicating the format.
+pub(super) fn render_explain_plan(
+    w: &mut dyn std::io::Write,
+    command: &str,
+    steps: &[String],
+) -> std::io::Result<()> {
+    writeln!(w, "Plan for `{command}`:")?;
+    writeln!(w)?;
+    if steps.is_empty() {
+        writeln!(w, "  (No steps — this command has no side effects.)")?;
+    } else {
+        for (i, step) in steps.iter().enumerate() {
+            writeln!(w, "  {:>2}. {step}", i + 1)?;
+        }
+    }
+    writeln!(w)?;
+    writeln!(
+        w,
+        "(`--explain` shows the plan without running it. Drop `--explain` to execute.)"
+    )?;
+    Ok(())
 }
 
 /// `git ws` (no arg) — show the current workspace context. The

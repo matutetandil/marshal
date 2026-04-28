@@ -34,10 +34,12 @@ const ABBREVIATE_THRESHOLD: usize = 5;
 
 /// `git ws status` — aggregated workspace status. The `all` field
 /// encodes the global `--all` flag (hide-boring vs full-expansion);
-/// `on` carries the global `--on <name>` declared-scope override.
+/// `on` carries the global `--on <name>` declared-scope override;
+/// `explain` flips into plan-only mode (Invariant 6).
 pub struct WsStatus {
     pub all: bool,
     pub on: Option<String>,
+    pub explain: bool,
 }
 
 impl Command for WsStatus {
@@ -88,6 +90,34 @@ impl Command for WsStatus {
             ScopePolicy::full_workspace(),
         )?;
 
+        // --explain: enumerate the git invocations we would run
+        // against each in-scope repo, without running them.
+        if self.explain {
+            let mut plan = Vec::new();
+            for repo in manifest.repos.iter().filter(|r| scope.contains(&r.name)) {
+                let rel_path = repo
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| format!("src/{}", repo.name));
+                let abs = ctx.root.join(&rel_path);
+                plan.push(format!("git -C {} rev-parse --git-dir", abs.display()));
+                plan.push(format!(
+                    "git -C {} status --porcelain=v2 --branch",
+                    abs.display()
+                ));
+            }
+            return Ok(WsStatusOutput {
+                workspace: WorkspaceInfo {
+                    root: ctx.root.to_string_lossy().into_owned(),
+                    name: manifest.workspace.name.clone(),
+                    default_branch: manifest.workspace.default_branch.clone(),
+                },
+                repos: Vec::new(),
+                all: self.all,
+                explain_plan: Some(plan),
+            });
+        }
+
         let repos = manifest
             .repos
             .iter()
@@ -125,6 +155,7 @@ impl Command for WsStatus {
             workspace,
             repos,
             all: self.all,
+            explain_plan: None,
         })
     }
 }
@@ -183,6 +214,11 @@ pub struct WsStatusOutput {
     /// human form abbreviates.
     #[serde(skip)]
     pub all: bool,
+
+    /// `Some(plan)` when `--explain` was set. The repos vec is
+    /// empty in that case; the renderer surfaces the plan instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explain_plan: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -218,6 +254,10 @@ pub struct RepoStatus {
 
 impl Renderable for WsStatusOutput {
     fn render_human(&self, w: &mut dyn Write) -> io::Result<()> {
+        if let Some(plan) = &self.explain_plan {
+            return super::render_explain_plan(w, "ws status", plan);
+        }
+
         writeln!(
             w,
             "Workspace `{}` (default branch: {}) — {} repos declared",

@@ -46,6 +46,10 @@ pub struct WsDiff {
     /// Validated against the manifest's declared repos before
     /// running so a typo errors out clearly.
     pub on: Option<String>,
+    /// `--explain` from the dispatcher — list the `git show`
+    /// invocation we would run plus the comparison we would do,
+    /// without doing it.
+    pub explain: bool,
 }
 
 impl Command for WsDiff {
@@ -81,15 +85,54 @@ impl Command for WsDiff {
             .context("failed to read workspace state declaration")?
             .unwrap_or_default();
 
+        // Validate `--on` against the manifest. We do this even
+        // under `--explain` so a typo in the override surfaces
+        // before the user reads the (irrelevant) plan.
+        let _scope = scope::resolve(
+            self.on.as_deref(),
+            &manifest,
+            &current,
+            ctx.current_repo.as_deref(),
+            ScopePolicy::full_workspace(),
+        )?;
+
+        // --explain: describe the comparison we would perform.
+        if self.explain {
+            let mut plan = vec![
+                format!(
+                    "read working-tree state at `{}/.workspace/state.toml`",
+                    ctx.root.display()
+                ),
+                format!(
+                    "git -C {} show HEAD:.workspace/state.toml",
+                    ctx.root.display()
+                ),
+                "compare the two state declarations and emit per-repo \
+                 added/removed/changed entries"
+                    .to_string(),
+            ];
+            if self.on.is_some() {
+                plan.push(format!(
+                    "filter the change list to entries matching --on (`{}`)",
+                    self.on.as_deref().unwrap_or("")
+                ));
+            }
+            return Ok(WsDiffOutput {
+                workspace: WorkspaceInfo {
+                    root: ctx.root.to_string_lossy().into_owned(),
+                    name: manifest.workspace.name.clone(),
+                },
+                changes: Vec::new(),
+                explain_plan: Some(plan),
+            });
+        }
+
         // HEAD's state.toml via `git show`. Any failure (no commits,
         // file didn't exist at HEAD, not a git repo) collapses to
         // "empty at HEAD" — current entries then read as additions.
         let head = load_state_at_head(&ctx.root)?;
 
-        // Validate `--on` against the manifest. We don't need
-        // `infer()` here — the diff is naturally "across all
-        // declared state", and `--on` filters the result list.
-        let scope = scope::resolve(
+        let scope_for_filter = scope::resolve(
             self.on.as_deref(),
             &manifest,
             &current,
@@ -99,7 +142,7 @@ impl Command for WsDiff {
 
         let mut changes = compute_changes(&head, &current);
         if self.on.is_some() {
-            changes.retain(|c| scope.contains(&c.name().to_string()));
+            changes.retain(|c| scope_for_filter.contains(&c.name().to_string()));
         }
 
         Ok(WsDiffOutput {
@@ -108,6 +151,7 @@ impl Command for WsDiff {
                 name: manifest.workspace.name.clone(),
             },
             changes,
+            explain_plan: None,
         })
     }
 }
@@ -176,6 +220,11 @@ fn compute_changes(head: &StateDeclaration, current: &StateDeclaration) -> Vec<S
 pub struct WsDiffOutput {
     pub workspace: WorkspaceInfo,
     pub changes: Vec<StateChange>,
+
+    /// `Some(plan)` when `--explain` was set. Other fields are
+    /// empty in that case; the renderer surfaces the plan instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explain_plan: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -207,6 +256,10 @@ pub enum StateChange {
 
 impl Renderable for WsDiffOutput {
     fn render_human(&self, w: &mut dyn Write) -> io::Result<()> {
+        if let Some(plan) = &self.explain_plan {
+            return super::render_explain_plan(w, "ws diff", plan);
+        }
+
         writeln!(
             w,
             "Workspace `{}` — state declaration changes (working tree vs HEAD)",

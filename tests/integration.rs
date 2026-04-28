@@ -2710,6 +2710,222 @@ fn on_flag_equals_form_works() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// `--explain` flag (Slice I)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `ws init --explain` shows the plan but does NOT touch the
+/// filesystem. Critical safety property — Invariant 6 says the
+/// plan is shown *before* execution; with --explain it's shown
+/// *instead of* execution.
+#[test]
+fn ws_init_explain_does_not_create_files() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let target = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(target.path())
+        .args(["ws", "init", "--explain", "--name", "explained"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws init`"));
+    assert!(stdout.contains("create directory"));
+    assert!(stdout.contains("manifest.toml"));
+    assert!(stdout.contains("state.toml"));
+
+    // The critical assertion: nothing was written.
+    assert!(
+        !target.path().join(".workspace").exists(),
+        "`.workspace/` must not be created under --explain"
+    );
+}
+
+/// `ws status --explain` enumerates the per-repo `git -C <path>`
+/// invocations without running them.
+#[test]
+fn ws_status_explain_lists_git_invocations() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws status`"));
+    assert!(stdout.contains("git -C") && stdout.contains("rev-parse --git-dir"));
+    assert!(stdout.contains("status --porcelain=v2 --branch"));
+    assert!(stdout.contains("alpha"));
+    assert!(stdout.contains("beta"));
+}
+
+/// `ws status --on alpha --explain` narrows the plan via --on.
+#[test]
+fn ws_status_explain_respects_on_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--on", "alpha", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alpha"));
+    assert!(
+        !stdout.contains("beta"),
+        "beta must not appear in --on alpha plan, got: {stdout}"
+    );
+}
+
+/// `ws log --explain` lists the per-repo `git log` invocation.
+#[test]
+fn ws_log_explain_lists_git_log_invocations() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log", "--explain", "-n", "5"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws log`"));
+    assert!(stdout.contains("git -C") && stdout.contains("log --pretty=format:"));
+    // The cap from `-n 5` must show in the plan.
+    assert!(stdout.contains("-n5"));
+    // Sanity: the format string is the actual git format
+    // (single-percent), not the doubled form.
+    assert!(stdout.contains("%H%x09"));
+}
+
+/// `ws diff --explain` describes the comparison without running it.
+#[test]
+fn ws_diff_explain_describes_comparison() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "diff", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws diff`"));
+    assert!(stdout.contains("git -C") && stdout.contains("show HEAD:.workspace/state.toml"));
+    assert!(stdout.contains("compare"));
+}
+
+/// JSON form under `--explain` carries the plan in the
+/// `explain_plan` field (skipped otherwise).
+#[test]
+fn ws_status_explain_json_includes_plan_field() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--explain", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let plan = parsed["explain_plan"]
+        .as_array()
+        .expect("explain_plan is an array");
+    assert!(!plan.is_empty(), "plan should have entries");
+    assert!(plan
+        .iter()
+        .any(|p| p.as_str().unwrap_or("").contains("rev-parse --git-dir")));
+}
+
+/// Without `--explain`, the `explain_plan` field is absent in JSON.
+#[test]
+fn ws_status_without_explain_omits_plan_field_in_json() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        parsed.get("explain_plan").is_none(),
+        "explain_plan should be omitted without --explain, got: {parsed}"
+    );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal help`
 // ───────────────────────────────────────────────────────────────────────────
 
