@@ -193,12 +193,33 @@ The three zones, mental model:
 - [x] `ws unstage <repo>` — drop the entry from `staged.toml`.
   Idempotent: unstaging a never-staged repo is a no-op, not an
   error.
-- [ ] `ws restore <repo>` — return repo to declared state
+- [x] `ws restore <repo>` — bring a child back to the declared
+  branch (state.toml override or manifest default). First Phase 3
+  command that writes to a child working tree. Pre-flight gates
+  the operation: hard blockers (in-progress merge / rebase /
+  cherry-pick / revert / bisect, working-tree conflicts,
+  initial-empty repo) refuse unconditionally; soft blockers
+  (uncommitted changes) refuse by default and are resolved via
+  the mutually-exclusive `--auto-stash` (preserve via
+  `git stash push --include-untracked`) or `--discard-changes`
+  (destructive `git reset --hard` + `git clean -fd`). Already-on-
+  declared is a clean no-op; `--explain` describes the plan
+  including which resolution step would run on a dirty tree.
+  Single-repo only this slice — multi-repo `ws restore --all`
+  waits for the parallel-execution framework.
 - [ ] `ws reset` — clear staging
 - [ ] `ws commit` — commit staged changes as new state.toml in workspace repo
 - [ ] Workspace branching: `ws branch <name>` with scope inference
 - [ ] Workspace switching: `ws switch <name>` with state materialization
-- [ ] Pre-flight checks framework
+- [x] Pre-flight checks framework — `src/workspace/preflight.rs`
+  hosts the `Obstacle` enum (tagged-enum JSON: in_progress,
+  conflicts, staged_changes, unstaged_changes, untracked_files,
+  initial_empty), the per-state `obstacles(state)` classifier,
+  and the `is_hard_blocker` / `cleared_by_auto_stash` /
+  `cleared_by_discard` predicates. Single consumer today
+  (`ws restore`); Slice H consolidates the framework into a
+  Strategy + Registry shared by every coordinated multi-repo
+  operation.
 - [ ] Parallel execution framework with error aggregation
 
 **Deliverable:** complete workspace model operational. Developers can create workspaces, work in them, curate state, and coordinate changes across repos.

@@ -7,14 +7,83 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
-the three zones: declared / staged / working). Two slices shipped:
-the per-developer staging area (`ws stage` / `ws unstage`) and
-its surfacing through `ws status`. Next: `ws restore`, `ws reset`,
-`ws commit`, `ws branch`, `ws switch`, plus the pre-flight +
-parallel-execution frameworks. See
+the three zones: declared / staged / working). Three slices
+shipped: the per-developer staging area (`ws stage` / `ws unstage`,
+Slice A), its surfacing through `ws status` (Slice B), and the
+first child-working-tree-write command (`ws restore`, Slice C),
+plus a `tests/invariants.rs` meta-test crate (Slice B.5) that
+guards the auto-checkable invariants from `docs/PRINCIPLES.md`.
+Next: `ws reset`, `ws commit`, `ws branch`, `ws switch`, plus the
+pre-flight + parallel-execution frameworks. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
+
+- **`ws restore <repo>` (Slice C).** First Phase 3 command that
+  writes to a child repo's working tree. Switches the named child
+  back to the workspace's declared branch (state.toml override or
+  manifest default).
+  - **Pre-flight gates the operation** before any git invocation
+    runs. Two tiers of obstacles, exposed via the new
+    `src/workspace/preflight.rs` module:
+      * **Hard blockers** (in-progress merge / rebase / cherry-pick
+        / revert / bisect, working-tree conflicts, initial-empty
+        repo): refused unconditionally — no flag clears them. The
+        error explains each obstacle and the manual recovery
+        path.
+      * **Soft blockers** (staged / unstaged / untracked changes):
+        refused by default (Invariant 8: Conservative Defaults).
+        The user opts in to one of two resolutions:
+          - `--auto-stash`        →  `git stash push --include-untracked`
+                                     (preserves work; recoverable
+                                     via `git stash pop`).
+          - `--discard-changes`   →  `git reset --hard` + `git clean
+                                     -fd` (destructive; explicit
+                                     opt-in).
+  - The two resolution flags are mutually exclusive — the user
+    has to pick a side: preserve or destroy.
+  - Already-on-declared is a no-op with a clear message; nothing
+    runs against the child.
+  - The error message lists every detected obstacle, marking the
+    blockers (`✗`) versus those a flag would clear (`✓`), and
+    suggests the next concrete step.
+  - `--explain` describes the plan without executing, including
+    which resolution step would run if the working tree were
+    dirty (handy "rehearsal" for `--auto-stash`).
+  - `--on <name>` is rejected with a hint at the canonical
+    `ws restore <name>` form — single-repo restore takes a
+    positional; `--on` is the multi-repo declared-scope override
+    that does not apply here. The check fires before arg parsing
+    so a stray `--on` always surfaces the right hint.
+  - JSON shape: `{root, repo_name, path, declared_branch,
+    from_branch?, from_commit?, to_branch, to_commit?, stashed,
+    discarded, obstacles[], explain_plan?}`. Obstacles are
+    tagged-enum (`{kind: "in_progress" | "conflicts" |
+    "staged_changes" | …, …}`) — single-switch consumption,
+    same precedent as `ws diff`'s `StateChange`.
+
+  Single-repo only this slice. The multi-repo `ws restore --all`
+  variant waits for the parallel-execution framework in Slice H
+  (Phase 3 close).
+
+- **`tests/invariants.rs` meta-test crate (Slice B.5).** A new
+  test target where each test enforces one of the documented
+  invariants from `docs/PRINCIPLES.md` from the outside, by running
+  the binary against fixtures and asserting externally-visible
+  properties. Test names are prefixed with `invariant_<N>_` so a
+  CI failure says exactly which principle was broken.
+  - Initial set: 7 tests covering Invariants 6, 8, and a doc-parity
+    corollary of 10. The unit-level sync guards in `src/`
+    (error_hints rule_id ↔ help topic, what_now rule_id ↔ help
+    topic) stay where they are — they enforce code-adjacent
+    invariants closer to the source.
+  - Verified to catch a regression: removing `ws unstage` from
+    the unknown-subcommand error fired
+    `invariant_10_unknown_ws_subcommand_error_lists_every_known_subcommand`
+    with a message naming the missing subcommand.
+  - CI matrix already runs `cargo test --all-targets`, which
+    picks up the new crate without `.github/workflows/ci.yml`
+    changes.
 
 - **`ws status` surfaces the staging zone (Slice B).** When a repo
   has a staging entry in `.workspace/local/staged.toml`, the
