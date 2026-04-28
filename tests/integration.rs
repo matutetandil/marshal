@@ -3482,11 +3482,24 @@ fn args_with_spaces_and_unicode_are_preserved() {
 // `ws clone` — workspace clone with parallel children + indicatif progress
 // ───────────────────────────────────────────────────────────────────────────
 
+/// Build a `file://` URL for a local path. Delegates to
+/// `url::Url::from_file_path`, which handles Windows drive letters
+/// (`C:\foo\bar` → `file:///C:/foo/bar`), forward-slash normalisation,
+/// and URL-encoding of special characters in one shot. Without it, a
+/// raw `format!("file://{}", path.display())` on Windows produces
+/// backslashes that TOML reads as the start of `\U`-prefixed Unicode
+/// escapes, breaking the manifest parser.
+fn local_file_url(path: &std::path::Path) -> String {
+    url::Url::from_file_path(path)
+        .expect("test path must be absolute")
+        .to_string()
+}
+
 /// Build a self-contained workspace source on disk: N child repos plus a
 /// "workspace repo" that declares them all in `.workspace/manifest.toml`.
 /// Returns the temp dir owning the trees plus the absolute path of the
-/// workspace source repo (suitable for use as a `file://` clone URL via
-/// `format!("file://{}", path.display())`).
+/// workspace source repo (use [`local_file_url`] to build a clone URL
+/// from it).
 ///
 /// Used by every `ws clone` integration test below — they only differ in
 /// what they do *with* the cloned tree (assert child presence, assert
@@ -3525,8 +3538,8 @@ fn make_workspace_with_children(child_names: &[&str]) -> (TempDir, std::path::Pa
     let mut manifest = String::from("[workspace]\nname = \"smoke\"\ndefault_branch = \"main\"\n\n");
     for name in child_names {
         manifest.push_str(&format!(
-            "[[repos]]\nname = \"{name}\"\nurl = \"file://{}\"\n\n",
-            sources.join(name).display()
+            "[[repos]]\nname = \"{name}\"\nurl = \"{}\"\n\n",
+            local_file_url(&sources.join(name))
         ));
     }
     std::fs::write(workspace.join(".workspace").join("manifest.toml"), manifest).unwrap();
@@ -3584,7 +3597,7 @@ fn ws_clone_workspace_with_children_materialises_each_child() {
     let dest_root = TempDir::new().unwrap();
 
     let (_sources, ws_path) = make_workspace_with_children(&["alpha", "beta", "gamma"]);
-    let url = format!("file://{}", ws_path.display());
+    let url = local_file_url(&ws_path);
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(dest_root.path())
@@ -3625,7 +3638,7 @@ fn ws_clone_no_children_flag_skips_fan_out() {
     let dest_root = TempDir::new().unwrap();
 
     let (_sources, ws_path) = make_workspace_with_children(&["alpha", "beta"]);
-    let url = format!("file://{}", ws_path.display());
+    let url = local_file_url(&ws_path);
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(dest_root.path())
@@ -3655,7 +3668,7 @@ fn ws_clone_against_plain_repo_succeeds_without_children() {
 
     let plain = TempDir::new().unwrap();
     init_child_repo(plain.path());
-    let url = format!("file://{}", plain.path().display());
+    let url = local_file_url(plain.path());
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(dest_root.path())
@@ -3680,7 +3693,7 @@ fn ws_clone_json_carries_per_child_results_with_kind_field() {
     let dest_root = TempDir::new().unwrap();
 
     let (_sources, ws_path) = make_workspace_with_children(&["alpha", "beta"]);
-    let url = format!("file://{}", ws_path.display());
+    let url = local_file_url(&ws_path);
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(dest_root.path())
@@ -3717,10 +3730,10 @@ fn ws_clone_partial_failure_completes_other_children_and_exits_zero() {
     let bogus = sources_owner.path().join("does-not-exist");
     let amended = format!(
         "[workspace]\nname = \"partial\"\ndefault_branch = \"main\"\n\n\
-         [[repos]]\nname = \"alpha\"\nurl = \"file://{}\"\n\n\
-         [[repos]]\nname = \"missing\"\nurl = \"file://{}\"\n",
-        sources_owner.path().join("sources").join("alpha").display(),
-        bogus.display()
+         [[repos]]\nname = \"alpha\"\nurl = \"{}\"\n\n\
+         [[repos]]\nname = \"missing\"\nurl = \"{}\"\n",
+        local_file_url(&sources_owner.path().join("sources").join("alpha")),
+        local_file_url(&bogus)
     );
     std::fs::write(ws_path.join(".workspace").join("manifest.toml"), &amended).unwrap();
     StdCommand::new("git")
@@ -3729,7 +3742,7 @@ fn ws_clone_partial_failure_completes_other_children_and_exits_zero() {
         .status()
         .unwrap();
 
-    let url = format!("file://{}", ws_path.display());
+    let url = local_file_url(&ws_path);
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(dest_root.path())
         .args(["ws", "clone", "--json", &url, "cloned"])

@@ -50,6 +50,11 @@ indicatif = "0.17"
 tempfile = "3.10"
 assert_cmd = "2.0"
 predicates = "3.1"
+# Used by integration tests to build `file://` URLs portably from
+# Path values. `Url::from_file_path` handles Windows drive letters,
+# forward-slash normalisation, and URL-encoding — none of which we
+# want to reinvent in test helpers.
+url = "2"
 
 [profile.release]
 lto = true
