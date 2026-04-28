@@ -24,6 +24,7 @@ use crate::context;
 use crate::git::porcelain::{InProgressOp, RepoState};
 use crate::workspace::manifest::Manifest;
 use crate::workspace::scope::{self, ScopePolicy};
+use crate::workspace::staged::{RepoStaged, StagedDeclaration};
 use crate::workspace::state::StateDeclaration;
 
 /// Threshold for "show full list inline" vs "list interesting + count
@@ -70,6 +71,12 @@ impl Command for WsStatus {
         let state = StateDeclaration::try_load_from_workspace(&ctx.root)
             .context("failed to read workspace state declaration")?;
 
+        // staged.toml is per-developer (in `.workspace/local/`).
+        // Missing = nothing staged, which is the common case.
+        let staged = StagedDeclaration::try_load_from_workspace(&ctx.root)
+            .context("failed to read workspace staging declaration")?
+            .unwrap_or_default();
+
         let workspace = WorkspaceInfo {
             root: ctx.root.to_string_lossy().into_owned(),
             name: manifest.workspace.name.clone(),
@@ -91,9 +98,15 @@ impl Command for WsStatus {
         )?;
 
         // --explain: enumerate the git invocations we would run
-        // against each in-scope repo, without running them.
+        // against each in-scope repo, without running them. The
+        // staging declaration read happens in the workspace itself
+        // (no shellout); we surface it as a step so the plan is a
+        // complete picture of the inputs.
         if self.explain {
-            let mut plan = Vec::new();
+            let mut plan = vec![format!(
+                "read `{}/.workspace/local/staged.toml` (treat missing as empty)",
+                ctx.root.display()
+            )];
             for repo in manifest.repos.iter().filter(|r| scope.contains(&r.name)) {
                 let rel_path = repo
                     .path
@@ -138,7 +151,12 @@ impl Command for WsStatus {
                     .unwrap_or_else(|| manifest.workspace.default_branch.clone());
 
                 let (repo_state, missing_from_disk) = inspect_repo(&abs_path);
-                let clean_on_declared = is_boring(&repo_state, &declared_branch);
+                let staging = staged.get(&repo.name).cloned();
+                let staging_drifted = staging
+                    .as_ref()
+                    .map(|s| staging_drifts(s, &repo_state))
+                    .unwrap_or(false);
+                let clean_on_declared = is_boring(&repo_state, &declared_branch, staging.is_some());
 
                 RepoStatus {
                     name: repo.name.clone(),
@@ -147,6 +165,8 @@ impl Command for WsStatus {
                     clean_on_declared,
                     missing_from_disk,
                     state: repo_state,
+                    staging,
+                    staging_drifted,
                 }
             })
             .collect();
@@ -182,9 +202,18 @@ fn inspect_repo(abs_path: &Path) -> (Option<RepoState>, bool) {
 
 /// A repo is "boring" (clean and on declared) iff every dimension
 /// matches the user's intent: branch matches, working tree clean,
-/// no in-progress op, no ahead/behind. Anything else makes it
-/// "interesting" and the renderer surfaces it individually.
-fn is_boring(state: &Option<RepoState>, declared_branch: &str) -> bool {
+/// no in-progress op, no ahead/behind, and **nothing staged**.
+/// Anything else makes it "interesting" and the renderer surfaces
+/// it individually.
+///
+/// Staged repos are never boring: even when the working state
+/// looks clean and on the declared branch, a staging entry means
+/// the user is mid-flight on a workspace commit and should see
+/// what is queued.
+fn is_boring(state: &Option<RepoState>, declared_branch: &str, has_staging: bool) -> bool {
+    if has_staging {
+        return false;
+    }
     let Some(rs) = state else {
         // Missing / unreadable = interesting by definition.
         return false;
@@ -202,6 +231,28 @@ fn is_boring(state: &Option<RepoState>, declared_branch: &str) -> bool {
         return false;
     }
     rs.branch.name.as_deref() == Some(declared_branch)
+}
+
+/// `true` when the staging snapshot no longer matches the working
+/// state — the user staged X, then moved to Y. Returns `false`
+/// whenever the comparison is impossible (no working state, or the
+/// repo is detached/initial — `ws stage` refuses those, but a
+/// hand-edited `staged.toml` could still produce them).
+///
+/// Drift is informational, not a bug: `ws commit` will write the
+/// staged values verbatim. The status display surfaces drift so the
+/// user sees that "what I'll commit" differs from "what I'm
+/// looking at right now" and decides whether to re-stage.
+fn staging_drifts(staged: &RepoStaged, state: &Option<RepoState>) -> bool {
+    let Some(rs) = state else {
+        // No working state to compare against — render the staging
+        // entry as-is, do not flag it as drifted. The renderer
+        // surfaces the "missing on disk" condition separately.
+        return false;
+    };
+    let working_branch = rs.branch.name.as_deref();
+    let working_oid = rs.branch.oid.as_deref();
+    Some(staged.branch.as_str()) != working_branch || Some(staged.commit.as_str()) != working_oid
 }
 
 #[derive(Serialize)]
@@ -238,8 +289,9 @@ pub struct RepoStatus {
     /// override or manifest default).
     pub declared_branch: String,
     /// `true` when the repo's on-disk state matches the user's
-    /// declared intent in every dimension. The renderer collapses
-    /// these into a single count line under hide-boring.
+    /// declared intent in every dimension AND the repo is not
+    /// staged. The renderer collapses these into a single count
+    /// line under hide-boring.
     pub clean_on_declared: bool,
     /// `true` when the repo's on-disk path does not exist (typical
     /// for a freshly-`ws init`-ed workspace where children have
@@ -250,6 +302,25 @@ pub struct RepoStatus {
     /// as "interesting" and surfaces a one-line note.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<RepoState>,
+    /// The staging snapshot for this repo, if any. Populated from
+    /// `.workspace/local/staged.toml`; `None` when the repo is not
+    /// in the user's staging area.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staging: Option<RepoStaged>,
+    /// `true` when `staging` is `Some` AND its `(branch, commit)`
+    /// no longer matches the working state. Informational only —
+    /// `ws commit` will record the staged values regardless. Useful
+    /// for the user to notice "I staged X, but I'm now looking at
+    /// Y; do I want to re-stage?".
+    #[serde(skip_serializing_if = "is_false")]
+    pub staging_drifted: bool,
+}
+
+/// Helper for the `staging_drifted` `skip_serializing_if`.
+/// Avoids polluting JSON with `staging_drifted: false` on every
+/// non-staged repo (the common case).
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl Renderable for WsStatusOutput {
@@ -308,6 +379,35 @@ impl Renderable for WsStatusOutput {
                 "{boring_count} other {plural} clean and on declared branch. \
                  Run with `--all` to list them."
             )?;
+        }
+
+        // Staging-aware footer. Echoes git status's "Changes to be
+        // committed" idea: when the user has staged anything, surface
+        // the count + a hint at how to commit it. Skipped when nothing
+        // is staged (the common case for cold inspections).
+        let staged_count = self.repos.iter().filter(|r| r.staging.is_some()).count();
+        let drifted_count = self.repos.iter().filter(|r| r.staging_drifted).count();
+        if staged_count > 0 {
+            writeln!(w)?;
+            let plural = if staged_count == 1 { "repo" } else { "repos" };
+            writeln!(
+                w,
+                "{staged_count} {plural} staged for commit. \
+                 Run `ws commit` to flush staged → state.toml."
+            )?;
+            if drifted_count > 0 {
+                let dplural = if drifted_count == 1 {
+                    "repo's"
+                } else {
+                    "repos'"
+                };
+                writeln!(
+                    w,
+                    "  ({drifted_count} {dplural} working state has drifted from \
+                     the staged snapshot. The commit will record the staged values; \
+                     re-run `ws stage <repo>` if you'd rather pin the latest state.)"
+                )?;
+            }
         }
 
         Ok(())
@@ -393,11 +493,35 @@ fn describe_repo(repo: &RepoStatus) -> String {
         parts.push(wt_parts.join(", "));
     }
 
+    // Staging segment. Always appended last so the "staged at …"
+    // marker reads as a separate fact about the repo, not as part
+    // of the working-tree summary.
+    if let Some(st) = &repo.staging {
+        let short = short_sha(&st.commit);
+        if repo.staging_drifted {
+            // Surface the drift so the user knows the snapshot will
+            // not match what they are looking at right now.
+            parts.push(format!(
+                "staged at `{}`@{} (drifted from working)",
+                st.branch, short
+            ));
+        } else {
+            parts.push(format!("staged at `{}`@{}", st.branch, short));
+        }
+    }
+
     if parts.is_empty() {
         "clean".to_string()
     } else {
         parts.join(" — ")
     }
+}
+
+/// Truncate a sha to seven characters for the human form. Matches
+/// git's default short-hash length; long-form stays available in JSON.
+fn short_sha(sha: &str) -> &str {
+    let n = sha.len().min(7);
+    &sha[..n]
 }
 
 fn in_progress_label(op: InProgressOp) -> Option<&'static str> {
@@ -439,40 +563,40 @@ mod tests {
     }
 
     #[test]
-    fn boring_when_clean_on_declared_branch() {
+    fn boring_when_clean_on_declared_branch_and_not_staged() {
         let s = Some(clean_state_on("main"));
-        assert!(is_boring(&s, "main"));
+        assert!(is_boring(&s, "main", false));
     }
 
     #[test]
     fn interesting_when_on_wrong_branch() {
         let s = Some(clean_state_on("feat/x"));
-        assert!(!is_boring(&s, "main"));
+        assert!(!is_boring(&s, "main", false));
     }
 
     #[test]
     fn interesting_when_dirty() {
         let mut rs = clean_state_on("main");
         rs.working_tree.unstaged = 1;
-        assert!(!is_boring(&Some(rs), "main"));
+        assert!(!is_boring(&Some(rs), "main", false));
     }
 
     #[test]
     fn interesting_when_in_progress() {
         let mut rs = clean_state_on("main");
         rs.in_progress = InProgressOp::Rebase;
-        assert!(!is_boring(&Some(rs), "main"));
+        assert!(!is_boring(&Some(rs), "main", false));
     }
 
     #[test]
     fn interesting_when_ahead_or_behind() {
         let mut rs = clean_state_on("main");
         rs.branch.ahead = 1;
-        assert!(!is_boring(&Some(rs), "main"));
+        assert!(!is_boring(&Some(rs), "main", false));
 
         let mut rs2 = clean_state_on("main");
         rs2.branch.behind = 1;
-        assert!(!is_boring(&Some(rs2), "main"));
+        assert!(!is_boring(&Some(rs2), "main", false));
     }
 
     #[test]
@@ -480,17 +604,64 @@ mod tests {
         let mut rs = clean_state_on("main");
         rs.branch.is_detached = true;
         rs.branch.name = None;
-        assert!(!is_boring(&Some(rs), "main"));
+        assert!(!is_boring(&Some(rs), "main", false));
 
         let mut rs2 = clean_state_on("main");
         rs2.branch.is_initial = true;
-        assert!(!is_boring(&Some(rs2), "main"));
+        assert!(!is_boring(&Some(rs2), "main", false));
     }
 
     #[test]
     fn interesting_when_state_is_missing() {
         // No state at all = repo isn't on disk or is unreadable.
         // Always interesting — the user needs to know.
-        assert!(!is_boring(&None, "main"));
+        assert!(!is_boring(&None, "main", false));
+    }
+
+    #[test]
+    fn interesting_when_staged_even_if_otherwise_clean() {
+        // The user is mid-flight on a workspace commit. Surface
+        // the repo so they remember what is queued, even when its
+        // working state would otherwise read as boring.
+        let s = Some(clean_state_on("main"));
+        assert!(!is_boring(&s, "main", true));
+    }
+
+    fn staged(branch: &str, commit: &str) -> RepoStaged {
+        RepoStaged {
+            branch: branch.to_string(),
+            commit: commit.to_string(),
+        }
+    }
+
+    fn state_at(branch: &str, oid: &str) -> RepoState {
+        let mut rs = clean_state_on(branch);
+        rs.branch.oid = Some(oid.to_string());
+        rs
+    }
+
+    #[test]
+    fn drift_false_when_staging_matches_working() {
+        let s = Some(state_at("feat/x", "abc"));
+        assert!(!staging_drifts(&staged("feat/x", "abc"), &s));
+    }
+
+    #[test]
+    fn drift_true_when_branch_differs() {
+        let s = Some(state_at("main", "abc"));
+        assert!(staging_drifts(&staged("feat/x", "abc"), &s));
+    }
+
+    #[test]
+    fn drift_true_when_commit_differs() {
+        let s = Some(state_at("feat/x", "newcommit"));
+        assert!(staging_drifts(&staged("feat/x", "abc"), &s));
+    }
+
+    #[test]
+    fn drift_false_when_no_working_state_to_compare() {
+        // Missing repo: we can't compute drift. The renderer
+        // surfaces "missing on disk" separately; do not over-report.
+        assert!(!staging_drifts(&staged("feat/x", "abc"), &None));
     }
 }

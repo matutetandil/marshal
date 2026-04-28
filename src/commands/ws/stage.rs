@@ -27,7 +27,6 @@ use std::path::PathBuf;
 
 use crate::cli::{Command, Renderable};
 use crate::context;
-use crate::git;
 use crate::git::porcelain::RepoState;
 use crate::workspace::manifest::{Manifest, RepoEntry};
 use crate::workspace::staged::{RepoStaged, StagedDeclaration};
@@ -79,15 +78,16 @@ impl Command for WsStage {
         let abs_path = child_repo_path(&ctx.root, repo);
 
         // --explain: list the shellouts and the staging file write,
-        // without running anything. Honours Invariant 6.
+        // without running anything. Honours Invariant 6. Porcelain v2
+        // hands us branch + HEAD oid in a single shellout, so no
+        // separate `rev-parse HEAD` is needed.
         if self.explain {
             let plan = vec![
                 format!("git -C {} rev-parse --git-dir", abs_path.display()),
                 format!(
-                    "git -C {} symbolic-ref --quiet --short HEAD  (or detect detached HEAD)",
+                    "git -C {} status --porcelain=v2 --branch  (read branch + HEAD oid)",
                     abs_path.display()
                 ),
-                format!("git -C {} rev-parse HEAD", abs_path.display()),
                 format!(
                     "load existing `{}/.workspace/local/staged.toml` (creating the dir if absent)",
                     ctx.root.display()
@@ -156,10 +156,13 @@ impl Command for WsStage {
                  This is a marshal bug; please report it."
             )
         })?;
-        let commit = git::rev_parse(&abs_path, "HEAD").with_context(|| {
-            format!(
-                "ws stage: failed to resolve HEAD commit of `{repo_name}` at {}",
-                abs_path.display()
+        // Porcelain v2 already gave us the HEAD oid (`# branch.oid …`);
+        // no extra shellout needed. The same `is_initial` guard above
+        // means `oid` is always populated by the time we reach here.
+        let commit = state.branch.oid.clone().ok_or_else(|| {
+            anyhow!(
+                "ws stage: porcelain reported no HEAD oid for `{repo_name}`. \
+                 This is a marshal bug; please report it."
             )
         })?;
 

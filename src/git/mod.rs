@@ -53,9 +53,13 @@ pub fn is_dirty(repo: &Path) -> Result<bool> {
     Ok(!out.stdout.is_empty())
 }
 
-/// Get the commit hash that a ref points to. Consumed by `ws stage`
-/// (Phase 3) to snapshot HEAD; future commands (`ws commit`,
-/// `ws restore`) will reuse it.
+/// Get the commit hash that a ref points to. Reserved for upcoming
+/// Phase 3 commands (`ws commit`, `ws restore`) that need to resolve
+/// arbitrary refs. `ws stage` initially used this for HEAD, then
+/// switched to reading porcelain v2's `branch.oid` directly so the
+/// staging path stays single-shellout. Re-enable the consumer-driven
+/// `dead_code` once a real consumer lands.
+#[allow(dead_code)]
 pub fn rev_parse(repo: &Path, reference: &str) -> Result<String> {
     let out = run(repo, &["rev-parse", reference])?;
     if !out.status.success() {

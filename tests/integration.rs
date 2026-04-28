@@ -3964,7 +3964,8 @@ fn ws_stage_explain_does_not_write() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Plan for `ws stage`"));
-    assert!(stdout.contains("rev-parse HEAD"));
+    // Branch + HEAD oid arrive together via `status --porcelain=v2 --branch`.
+    assert!(stdout.contains("status --porcelain=v2 --branch"));
 
     // The two on-disk artefacts that the real run would produce: neither exists.
     let local = ws.path().join(".workspace").join("local");
@@ -4066,4 +4067,181 @@ fn ws_unstage_unknown_repo_errors_like_stage() {
     assert!(stderr.contains("'ghost'"));
     assert!(stderr.contains("does not match any repo"));
     assert!(stderr.contains("alpha"));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws status` — staging integration (Phase 3 Slice B)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// After `ws stage`, `ws status` surfaces the repo with a "staged at
+/// <branch>@<sha>" segment and the staged-count footer. The repo
+/// becomes interesting (no longer collapsible) even when its
+/// working state would otherwise read as boring.
+#[test]
+fn ws_status_surfaces_staged_repo_with_summary_footer() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+
+    // Stage alpha while it's still on main (the seeded branch). The
+    // repo is therefore clean+on-declared+staged: would normally
+    // collapse, but staging flips it to interesting.
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .assert()
+        .success();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alpha"));
+    assert!(stdout.contains("staged at `main`"));
+    assert!(
+        stdout.contains("1 repo staged for commit"),
+        "expected staged-count footer, got: {stdout}"
+    );
+    assert!(stdout.contains("ws commit"));
+}
+
+/// Staging entries that no longer match the working state are
+/// flagged as drifted in both the per-repo line and the footer's
+/// drift sub-line. Drift is informational — `ws commit` still
+/// records the staged values verbatim.
+#[test]
+fn ws_status_flags_drift_when_working_state_advanced_past_staged_snapshot() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = ws.path().join("src").join("alpha");
+
+    // Stage at the seeded HEAD on main, then move HEAD forward.
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .assert()
+        .success();
+
+    std::fs::write(alpha.join("change.txt"), "x").unwrap();
+    StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["add", "change.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["commit", "-q", "-m", "advance"])
+        .status()
+        .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("drifted from working"),
+        "expected drift marker on the alpha line, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("working state has drifted"),
+        "expected drift sub-line in footer, got: {stdout}"
+    );
+}
+
+/// JSON form gains `staging` and `staging_drifted` fields per repo.
+/// Both are absent when not applicable (skip_serializing_if), so
+/// machine consumers can branch on presence.
+#[test]
+fn ws_status_json_carries_staging_fields_only_when_applicable() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .assert()
+        .success();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let repos = parsed["repos"].as_array().unwrap();
+
+    let alpha = repos.iter().find(|r| r["name"] == "alpha").unwrap();
+    assert!(alpha["staging"].is_object());
+    assert_eq!(alpha["staging"]["branch"], "main");
+    // No drift after a fresh stage.
+    assert!(
+        alpha.get("staging_drifted").is_none()
+            || alpha["staging_drifted"] == serde_json::Value::Bool(false)
+    );
+
+    let beta = repos.iter().find(|r| r["name"] == "beta").unwrap();
+    // Beta is not staged: both fields are absent.
+    assert!(beta.get("staging").is_none());
+    assert!(beta.get("staging_drifted").is_none());
+}
+
+/// `ws status --explain` surfaces the new staged.toml read step as
+/// part of the plan, alongside the per-repo git invocations.
+#[test]
+fn ws_status_explain_lists_staging_read() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws status`"));
+    assert!(
+        stdout.contains("staged.toml"),
+        "expected the plan to mention staging file, got: {stdout}"
+    );
+}
+
+/// After `ws unstage`, `ws status` no longer surfaces staging
+/// markers. The repo collapses back to its plain-status category.
+#[test]
+fn ws_status_drops_staging_markers_after_unstage() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .assert()
+        .success();
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "unstage", "alpha"])
+        .assert()
+        .success();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("staged at"));
+    assert!(!stdout.contains("staged for commit"));
 }

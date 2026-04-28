@@ -42,6 +42,12 @@ pub struct BranchInfo {
     /// `true` when the repo has no commits yet (`git init`, nothing
     /// committed). Mutually exclusive with `is_detached`.
     pub is_initial: bool,
+    /// Full commit hash that HEAD points at. `None` when the repo is
+    /// at its initial empty state. Captured directly from porcelain
+    /// v2's `# branch.oid <hash>` line, so it costs no extra
+    /// shellout. Consumed by `ws status` to detect drift between a
+    /// staging snapshot and the current working state.
+    pub oid: Option<String>,
     /// Tracking remote/branch pair, e.g. `origin/main`. `None` when
     /// no upstream is configured for the current branch.
     pub upstream: Option<String>,
@@ -192,6 +198,8 @@ pub fn parse_porcelain_v2(text: &str) -> RepoState {
         } else if let Some(rest) = line.strip_prefix("# branch.oid ") {
             if rest == "(initial)" {
                 state.branch.is_initial = true;
+            } else {
+                state.branch.oid = Some(rest.to_string());
             }
         } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
             state.branch.upstream = Some(rest.to_string());
@@ -272,6 +280,7 @@ mod tests {
         assert_eq!(s.branch.name.as_deref(), Some("main"));
         assert!(!s.branch.is_detached);
         assert!(!s.branch.is_initial);
+        assert_eq!(s.branch.oid.as_deref(), Some("1234567890abcdef"));
         assert_eq!(s.branch.upstream.as_deref(), Some("origin/main"));
         assert_eq!(s.branch.ahead, 2);
         assert_eq!(s.branch.behind, 0);
@@ -285,6 +294,9 @@ mod tests {
         assert!(s.branch.is_detached);
         assert!(s.branch.name.is_none());
         assert!(!s.branch.is_initial);
+        // OID is captured even on detached HEAD — the user is at a
+        // resolvable commit, just not on a named branch.
+        assert_eq!(s.branch.oid.as_deref(), Some("abcd"));
     }
 
     #[test]
@@ -293,6 +305,9 @@ mod tests {
         let s = parse_porcelain_v2(text);
         assert!(s.branch.is_initial);
         assert_eq!(s.branch.name.as_deref(), Some("main"));
+        // `(initial)` flips the boolean and leaves `oid` as None —
+        // there is no commit to point at yet.
+        assert!(s.branch.oid.is_none());
     }
 
     #[test]
