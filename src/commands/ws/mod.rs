@@ -34,6 +34,7 @@ use crate::context;
 use crate::workspace::manifest::Manifest;
 use crate::workspace::state::StateDeclaration;
 
+mod clone;
 mod diff;
 mod init;
 mod log;
@@ -92,14 +93,17 @@ pub fn dispatch(
             &args[1..],
             format,
         ),
+        // `git ws clone <url> [<dest>]` — clone the workspace repo
+        // and, in parallel, every child repo it declares.
+        Some("clone") => run_command(clone::WsClone { explain }, &args[1..], format),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
                  Run `git ws` for the workspace context, `git ws init` \
                  to create one, `git ws status` for aggregated state, \
-                 `git ws log` for cross-repo activity, or `git ws diff` \
-                 for state-declaration changes. More subcommands arrive \
-                 in Phase 2 — see ROADMAP.md."
+                 `git ws log` for cross-repo activity, `git ws diff` \
+                 for state-declaration changes, or `git ws clone <url>` \
+                 to clone a workspace and its child repos."
             );
             Ok(ExitCode::from(2))
         }

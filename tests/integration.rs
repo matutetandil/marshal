@@ -3477,3 +3477,309 @@ fn args_with_spaces_and_unicode_are_preserved() {
     let logged = String::from_utf8_lossy(&log.stdout);
     assert_eq!(logged.trim_end(), subject);
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws clone` — workspace clone with parallel children + indicatif progress
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Build a self-contained workspace source on disk: N child repos plus a
+/// "workspace repo" that declares them all in `.workspace/manifest.toml`.
+/// Returns the temp dir owning the trees plus the absolute path of the
+/// workspace source repo (suitable for use as a `file://` clone URL via
+/// `format!("file://{}", path.display())`).
+///
+/// Used by every `ws clone` integration test below — they only differ in
+/// what they do *with* the cloned tree (assert child presence, assert
+/// JSON shape, etc.). Centralising the fixture keeps each test focused.
+fn make_workspace_with_children(child_names: &[&str]) -> (TempDir, std::path::PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let sources = tmp.path().join("sources");
+    std::fs::create_dir(&sources).unwrap();
+
+    // Each child is a one-commit git repo on `main`.
+    for name in child_names {
+        let child = sources.join(name);
+        init_child_repo(&child);
+    }
+
+    // Workspace repo lives alongside, with a manifest pointing at every
+    // child via its absolute file:// path.
+    let workspace = sources.join("workspace");
+    std::fs::create_dir_all(workspace.join(".workspace")).unwrap();
+    StdCommand::new("git")
+        .current_dir(&workspace)
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(&workspace)
+        .args(["config", "user.email", "t@example.com"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(&workspace)
+        .args(["config", "user.name", "Test"])
+        .status()
+        .unwrap();
+
+    let mut manifest = String::from("[workspace]\nname = \"smoke\"\ndefault_branch = \"main\"\n\n");
+    for name in child_names {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"{name}\"\nurl = \"file://{}\"\n\n",
+            sources.join(name).display()
+        ));
+    }
+    std::fs::write(workspace.join(".workspace").join("manifest.toml"), manifest).unwrap();
+
+    StdCommand::new("git")
+        .current_dir(&workspace)
+        .args(["add", "."])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(&workspace)
+        .args(["commit", "-q", "-m", "seed workspace"])
+        .status()
+        .unwrap();
+    (tmp, workspace)
+}
+
+/// `ws clone --explain` is a dry run: it prints the plan and writes
+/// nothing — even when the destination would otherwise be a perfectly
+/// valid clone target. Mirrors the safety property documented for
+/// `ws init --explain`.
+#[test]
+fn ws_clone_explain_does_not_clone() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let outside = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(outside.path())
+        .args([
+            "ws",
+            "clone",
+            "--explain",
+            "https://github.com/example/foo.git",
+            "my-dest",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws clone`:"));
+    assert!(stdout.contains("git clone https://github.com/example/foo.git my-dest"));
+    // Crucially, no destination directory was created.
+    assert!(!outside.path().join("my-dest").exists());
+}
+
+/// Happy path: a workspace with three children clones cleanly. Each
+/// child is materialised under `<dest>/src/<name>/` with the seed
+/// commit visible. Exercises the parallel clone + manifest-driven
+/// child fan-out end-to-end.
+#[test]
+fn ws_clone_workspace_with_children_materialises_each_child() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let dest_root = TempDir::new().unwrap();
+
+    let (_sources, ws_path) = make_workspace_with_children(&["alpha", "beta", "gamma"]);
+    let url = format!("file://{}", ws_path.display());
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(dest_root.path())
+        .args(["ws", "clone", &url, "cloned"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "clone exited non-zero: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Cloned 3/3 child repos"));
+
+    // Every child has its working tree on disk.
+    let cloned = dest_root.path().join("cloned");
+    for name in ["alpha", "beta", "gamma"] {
+        let child = cloned.join("src").join(name);
+        assert!(
+            child.is_dir(),
+            "child `{name}` missing at {}",
+            child.display()
+        );
+        // Seed file from `init_child_repo` is the proof-of-life.
+        assert!(child.join("seed.txt").is_file());
+        assert!(child.join(".git").exists());
+    }
+    // Manifest came across as part of the workspace repo.
+    assert!(cloned.join(".workspace").join("manifest.toml").is_file());
+}
+
+/// `--no-children` clones the workspace repo only and skips the fan-out.
+/// The cloned tree therefore has the manifest but no `src/<name>` dirs.
+#[test]
+fn ws_clone_no_children_flag_skips_fan_out() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let dest_root = TempDir::new().unwrap();
+
+    let (_sources, ws_path) = make_workspace_with_children(&["alpha", "beta"]);
+    let url = format!("file://{}", ws_path.display());
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(dest_root.path())
+        .args(["ws", "clone", &url, "cloned", "--no-children"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let cloned = dest_root.path().join("cloned");
+    assert!(cloned.join(".workspace").join("manifest.toml").is_file());
+    assert!(!cloned.join("src").join("alpha").exists());
+    assert!(!cloned.join("src").join("beta").exists());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--no-children"));
+}
+
+/// A non-Marshal git repo (no `.workspace/manifest.toml`) is still a
+/// valid clone target. `ws clone` falls through to "plain clone, no
+/// fan-out" rather than erroring — a user pointing at an arbitrary
+/// repo gets a sensible result.
+#[test]
+fn ws_clone_against_plain_repo_succeeds_without_children() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let dest_root = TempDir::new().unwrap();
+
+    let plain = TempDir::new().unwrap();
+    init_child_repo(plain.path());
+    let url = format!("file://{}", plain.path().display());
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(dest_root.path())
+        .args(["ws", "clone", &url, "cloned"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("No `.workspace/manifest.toml`"));
+    // The cloned repo itself does exist on disk; the seed file came
+    // along with it.
+    assert!(dest_root.path().join("cloned").join("seed.txt").is_file());
+}
+
+/// JSON form: tagged-enum `kind` per child + the top-level
+/// `workspace_root`/`children` shape. Mirrors `ws diff`'s tagged-enum
+/// JSON style — single-switch consumption.
+#[test]
+fn ws_clone_json_carries_per_child_results_with_kind_field() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let dest_root = TempDir::new().unwrap();
+
+    let (_sources, ws_path) = make_workspace_with_children(&["alpha", "beta"]);
+    let url = format!("file://{}", ws_path.display());
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(dest_root.path())
+        .args(["ws", "clone", "--json", &url, "cloned"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["manifest_present"], true);
+    assert_eq!(parsed["no_children"], false);
+    let children = parsed["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2);
+    for child in children {
+        assert_eq!(child["kind"], "success");
+        assert!(child.get("name").is_some());
+        assert!(child.get("duration_ms").is_some());
+    }
+}
+
+/// Partial failure: one bogus URL among real ones. The good child
+/// clones successfully; the bad one is recorded as `kind = "failed"`
+/// and the operation still exits 0 (Invariant 5). Other children are
+/// not held back by the bad one.
+#[test]
+fn ws_clone_partial_failure_completes_other_children_and_exits_zero() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let dest_root = TempDir::new().unwrap();
+
+    // Build a workspace with one real child and inject a bogus second
+    // entry whose URL points at a path that does not exist.
+    let (sources_owner, ws_path) = make_workspace_with_children(&["alpha"]);
+    let bogus = sources_owner.path().join("does-not-exist");
+    let amended = format!(
+        "[workspace]\nname = \"partial\"\ndefault_branch = \"main\"\n\n\
+         [[repos]]\nname = \"alpha\"\nurl = \"file://{}\"\n\n\
+         [[repos]]\nname = \"missing\"\nurl = \"file://{}\"\n",
+        sources_owner.path().join("sources").join("alpha").display(),
+        bogus.display()
+    );
+    std::fs::write(ws_path.join(".workspace").join("manifest.toml"), &amended).unwrap();
+    StdCommand::new("git")
+        .current_dir(&ws_path)
+        .args(["commit", "-aq", "-m", "amend manifest"])
+        .status()
+        .unwrap();
+
+    let url = format!("file://{}", ws_path.display());
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(dest_root.path())
+        .args(["ws", "clone", "--json", &url, "cloned"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "partial failure should still exit 0"
+    );
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let children = parsed["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2);
+    // Order matches manifest declaration.
+    assert_eq!(children[0]["kind"], "success");
+    assert_eq!(children[0]["name"], "alpha");
+    assert_eq!(children[1]["kind"], "failed");
+    assert_eq!(children[1]["name"], "missing");
+    assert!(children[1]["error"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .contains("git clone"));
+
+    // Real child made it to disk regardless of the failed sibling.
+    assert!(dest_root
+        .path()
+        .join("cloned")
+        .join("src")
+        .join("alpha")
+        .join("seed.txt")
+        .is_file());
+}
+
+/// `ws clone` with no positional URL prints a clear error.
+#[test]
+fn ws_clone_without_url_errors_clearly() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let outside = TempDir::new().unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(outside.path())
+        .args(["ws", "clone"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("missing required <url>"),
+        "expected missing-url hint, got: {stderr}"
+    );
+}
