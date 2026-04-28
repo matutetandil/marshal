@@ -57,7 +57,11 @@ const STAGED_FILE_HEADER: &str = "\
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct StagedDeclaration {
     /// One entry per staged repo. Empty when nothing is staged.
-    #[serde(default)]
+    /// `skip_serializing_if` keeps the on-disk file clean after a
+    /// `ws reset` (header + empty body, no `[repos]` empty table
+    /// noise). Round-trip stays correct because `#[serde(default)]`
+    /// re-creates the empty map on deserialize.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub repos: HashMap<String, RepoStaged>,
 }
 
@@ -170,7 +174,6 @@ impl StagedDeclaration {
     }
 
     /// `true` when nothing is staged.
-    #[allow(dead_code)] // Consumed by `ws status` and `ws commit` (Slices B, E).
     pub fn is_empty(&self) -> bool {
         self.repos.is_empty()
     }

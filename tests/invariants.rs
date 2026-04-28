@@ -205,6 +205,7 @@ fn invariant_6_read_side_ops_announce_plan_under_explain() {
         ("diff", &[]),
         ("unstage", &["alpha"]),
         ("restore", &["alpha"]),
+        ("reset", &[]),
     ];
 
     for (subcmd, args) in cases {
@@ -284,7 +285,7 @@ fn invariant_8_init_refuses_existing_workspace_without_force() {
 #[test]
 fn invariant_10_unknown_ws_subcommand_error_lists_every_known_subcommand() {
     const KNOWN_WS_SUBCOMMANDS: &[&str] = &[
-        "init", "status", "log", "diff", "clone", "stage", "unstage", "restore",
+        "init", "status", "log", "diff", "clone", "stage", "unstage", "restore", "reset",
     ];
 
     let cfg_dir = TempDir::new().unwrap();

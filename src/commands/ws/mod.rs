@@ -38,6 +38,7 @@ mod clone;
 mod diff;
 mod init;
 mod log;
+mod reset;
 mod restore;
 mod stage;
 mod status;
@@ -115,6 +116,16 @@ pub fn dispatch(
             &args[1..],
             format,
         ),
+        // `git ws reset` — clear the entire staging area in one go.
+        // Counterpart to `ws unstage` (single repo).
+        Some("reset") => run_command(
+            reset::WsReset {
+                on: on.clone(),
+                explain,
+            },
+            &args[1..],
+            format,
+        ),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
@@ -124,8 +135,9 @@ pub fn dispatch(
                  for state-declaration changes, `git ws clone <url>` \
                  to clone a workspace, `git ws stage <repo>` / \
                  `git ws unstage <repo>` to manage the staging area, \
-                 or `git ws restore <repo>` to bring a child back to \
-                 its declared branch."
+                 `git ws restore <repo>` to bring a child back to \
+                 its declared branch, or `git ws reset` to clear \
+                 the entire staging area."
             );
             Ok(ExitCode::from(2))
         }

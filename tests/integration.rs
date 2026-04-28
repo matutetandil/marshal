@@ -4518,3 +4518,179 @@ fn ws_restore_rejects_on_flag() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("ws restore alpha"));
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws reset` — Phase 3 Slice D
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `ws reset` on an empty staging area is a clean no-op.
+/// `was_empty` is `true` in the JSON form.
+#[test]
+fn ws_reset_on_empty_staging_is_a_no_op() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "reset"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("already empty"));
+}
+
+/// Happy path: stage two repos, `ws reset` clears both. The
+/// resulting `staged.toml` keeps its header (so `cat staged.toml`
+/// still tells a curious user what the file is for) but has no
+/// `[repos.…]` entries.
+#[test]
+fn ws_reset_clears_every_staged_entry_and_preserves_header() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+
+    for r in ["alpha", "beta"] {
+        marshal_with_isolated_config(&cfg_path)
+            .current_dir(ws.path())
+            .args(["ws", "stage", r])
+            .assert()
+            .success();
+    }
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "reset"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "reset failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Cleared 2 staged entries"));
+    assert!(stdout.contains("alpha"));
+    assert!(stdout.contains("beta"));
+
+    // On-disk: header survives, body is empty.
+    let staged_path = ws
+        .path()
+        .join(".workspace")
+        .join("local")
+        .join("staged.toml");
+    let body = std::fs::read_to_string(&staged_path).unwrap();
+    assert!(body.contains("# staged.toml"));
+    // Real TOML tables begin at column 0; the header comment shows
+    // `[repos."<name>"]` but only as part of a `#` line. Match by
+    // line-start to ignore the example.
+    let has_real_entry = body.lines().any(|line| line.starts_with("[repos."));
+    assert!(
+        !has_real_entry,
+        "expected no `[repos.x]` table headers after reset, got:\n{body}"
+    );
+
+    // `ws status` no longer surfaces staging markers.
+    let status = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status"])
+        .output()
+        .unwrap();
+    let status_out = String::from_utf8_lossy(&status.stdout);
+    assert!(!status_out.contains("staged at"));
+    assert!(!status_out.contains("staged for commit"));
+}
+
+/// JSON form: `cleared` lists every removed entry sorted by name;
+/// `was_empty` is `false` after a real reset; `explain_plan` is
+/// absent.
+#[test]
+fn ws_reset_json_lists_cleared_entries_in_sorted_order() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["zeta", "alpha", "mu"]);
+
+    // Stage in a deliberately unsorted order — the output should
+    // still come back alphabetical.
+    for r in ["zeta", "mu", "alpha"] {
+        marshal_with_isolated_config(&cfg_path)
+            .current_dir(ws.path())
+            .args(["ws", "stage", r])
+            .assert()
+            .success();
+    }
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "reset", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["was_empty"], false);
+    let cleared = parsed["cleared"].as_array().unwrap();
+    let names: Vec<&str> = cleared
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["alpha", "mu", "zeta"]);
+    assert!(parsed.get("explain_plan").is_none());
+}
+
+/// `--explain` describes the plan without writing.
+#[test]
+fn ws_reset_explain_creates_no_files() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "reset", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws reset`"));
+
+    // No on-disk artefacts after a dry run.
+    let local = ws.path().join(".workspace").join("local");
+    assert!(!local.join("staged.toml").exists());
+    assert!(!local.join(".gitignore").exists());
+}
+
+/// `ws reset alpha` (a positional) is rejected with a hint at
+/// `ws unstage alpha` — keeps the two commands disjoint.
+#[test]
+fn ws_reset_rejects_positional_and_redirects_to_unstage() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "reset", "alpha"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ws unstage alpha"));
+}
+
+/// `ws reset --on alpha` is similarly rejected.
+#[test]
+fn ws_reset_rejects_on_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "reset", "--on", "alpha"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ws unstage alpha"));
+}
