@@ -6,11 +6,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work in progress on `0.4.0` — Phase 2 (read-only workspace
-operations). First slice shipped: the `ws` namespace exists and
-context detection is live. Next: manifest + state.toml parsing,
-`ws init`, `ws status`, `ws log`, `ws diff`, scope inference,
-the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+No unreleased work yet. The next cycle opens Phase 3 — workspace
+modifications (the three zones: declared, staged, working).
+
+## [0.4.0] — 2026-04-28
+
+Phase 2 complete. Marshal grew workspace awareness: `git ws` is now a
+namespace next to plain git, with five subcommands that observe a
+workspace from outside-in (`init`, `status`, `log`, `diff`, `clone`),
+a scope-inference engine that decides "which repos do I operate on?"
+from the cwd plus an explicit `--on <name>` override, and a global
+`--explain` flag that turns every operation into a dry-run plan
+(Invariant 6: Explainable Operations). The release stays read-only —
+no workspace command modifies anything beyond what `ws init` and
+`ws clone` write to disk on first creation. Modifications open in
+Phase 3.
+
+### Added
+
+- **`ws clone <url> [<dest>]`.** The last operational gap in Phase 2.
+  Clones the workspace repo synchronously, reads its
+  `.workspace/manifest.toml`, and fans out to every declared child
+  in **parallel**, with one Docker-style progress bar per child
+  driven from `git clone --progress`'s stderr stream.
+  - Threading: `std::thread::scope` runs one worker per child;
+    one shared `indicatif::MultiProgress` keeps the bars stacked.
+    Non-TTY environments (pipes, CI) gracefully fall back to
+    inert bars — output stays clean.
+  - Progress parser handles the canonical phases (Counting,
+    Compressing, Receiving, Resolving) plus Enumerating, Updating
+    files, and Filtering content. The `remote: ` prefix is stripped
+    transparently. Lines we do not recognise still surface as the
+    bar's free-form message so the user always sees something.
+  - Partial failures are tolerated (Invariant 5: Partial Failure
+    is Acceptable). A child whose clone fails is recorded as
+    `kind = "failed"` with the error string; siblings continue
+    cloning; the operation still exits 0. The human form summarises
+    `Cloned X/Y child repos` and lists failed entries in a footer.
+  - JSON shape mirrors `ws diff`'s tagged-enum precedent:
+    `{ workspace_url, workspace_root, no_children, manifest_present,
+    children: [{ kind: "success" | "failed", name, url, path,
+    duration_ms?, error? }, …] }`. Single-switch consumption.
+  - `--no-children` skips the fan-out — the workspace repo is
+    cloned, the manifest stays untouched, no `src/<name>` directories
+    appear. Useful for inspecting a workspace before committing to
+    cloning hundreds of repos.
+  - `--explain` describes the plan (workspace clone + manifest read +
+    parallel child invocations) without executing anything; the
+    same dry-run safety property as `ws init --explain`.
+  - A non-Marshal git repo (no `.workspace/manifest.toml` after the
+    workspace clone) is still a valid target: `ws clone` falls
+    through to "plain clone, no fan-out" and reports
+    `manifest_present: false` in JSON. Pointing at any random repo
+    URL produces a sensible result rather than an error.
+- **`indicatif`** is now a real dependency. Declared in `Cargo.toml`
+  since Phase 0 for exactly this slice, it lights up here for the
+  first time. No other module imports it yet.
+
+### Changed
+
+- `commands/ws/mod.rs` gains a `Some("clone")` arm in `dispatch`;
+  the unknown-subcommand hint now mentions `ws clone <url>`.
+- The integration test suite gained a `url` dev-dependency for
+  `Url::from_file_path`, used by the `ws clone` tests to build
+  `file://` URLs from temp paths portably (raw `format!("file://{}",
+  path.display())` produced backslash-laden URLs on Windows that
+  TOML rejected as invalid Unicode escapes).
 
 ### Added
 

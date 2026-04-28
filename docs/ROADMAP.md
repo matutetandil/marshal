@@ -78,7 +78,7 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
 
 **Deliverable:** a tool that enhances plain Git usage without any workspace features. Adoptable by users who have no intention of using workspaces.
 
-## Phase 2: Workspace Core — Read-Only Operations — 🟡 first slice shipped
+## Phase 2: Workspace Core — Read-Only Operations — ✅ shipped as `0.4.0` (2026-04-28)
 
 **Goal:** workspace detection and passive operations. No state modification yet.
 
@@ -106,7 +106,17 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   individually, default-branch repos collapsed into a count line.
   Global `--all` flag (mirrors `--json` shape) overrides the
   abbreviation. Threshold for unconditional expansion: 5 repos.
-- [ ] Workspace clone: `ws clone <url>` (clones workspace + all child repos in parallel)
+- [x] Workspace clone: `ws clone <url> [<dest>]`. Clones the workspace
+  repo synchronously, reads `.workspace/manifest.toml`, and fans out
+  to every declared child in parallel with one Docker-style
+  `indicatif::ProgressBar` per child under a shared `MultiProgress`.
+  Threading via `std::thread::scope`; per-child stderr parsed for the
+  four canonical `git clone --progress` phases (Counting, Compressing,
+  Receiving, Resolving). Partial failures are tolerated (Invariant 5):
+  a failed child becomes a `kind = "failed"` entry in the result list
+  and the operation still exits 0. `--no-children` skips the
+  fan-out; `--explain` prints the plan without executing it; a target
+  without a manifest falls through to "plain clone, no children".
 - [x] Workspace status: aggregated view of all repos, divergence reporting.
   `git ws status` walks every declared repo via `RepoState::detect_at(path)`
   (extracted to `crate::git::porcelain` from `marshal what-now`'s state

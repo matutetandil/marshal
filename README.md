@@ -10,15 +10,15 @@ Git handles single repositories well. Coordinating multiple related repositories
 
 ## Status
 
-🚧 **Early development.** Currently at `v0.3.0` — Phase 1 complete.
+🚧 **Early development.** Currently at `v0.4.0` — Phase 2 complete (read-only workspace).
 
-What's shipped today is the wrapper layer that sits on top of plain `git`. The workspace coordination layer — the original thesis — is the next milestone. When Marshal is aliased to `git`, every invocation passes through unchanged unless Marshal has something useful to add.
+What's shipped today is the wrapper layer that sits on top of plain `git`, plus the workspace observation layer: detect, inspect, and clone workspaces without modifying anything beyond the manifest/state files that `ws init` and `ws clone` create on first use. Modifications open in the next phase. When Marshal is aliased to `git`, every plain-git invocation still passes through unchanged unless Marshal has something useful to add.
 
 | Phase                         | Status                          | What it covers                                                                                                       |
 |-------------------------------|---------------------------------|----------------------------------------------------------------------------------------------------------------------|
 | 0 — Foundation                | ✅ shipped (`v0.1.0`)            | Pure alias/passthrough, cross-platform CI, release plumbing.                                                         |
 | 1 — Wrapper UX                | ✅ shipped (`v0.2.0` + `v0.3.0`) | Modernization tips, actionable error hints, three-tier config, `marshal what-now`, `marshal help`, `--json` everywhere. |
-| 2 — Workspace (read-only)     | ⏳ next                          | Context detection, `ws init`, manifest + `state.toml`, `ws status` / `log` / `diff`, scope inference, `--explain`.   |
+| 2 — Workspace (read-only)     | ✅ shipped (`v0.4.0`)            | `git ws` namespace: `init`, `status`, `log`, `diff`, `clone` (parallel children with progress bars), scope inference, `--explain`. |
 | 3+ — Workspace (full)         | 📋 designed                     | The three zones, branching, coordinated push/pull, oplog, undo, differentiating features.                            |
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan.
@@ -26,7 +26,7 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan.
 ## Install
 
 ```sh
-cargo install --git https://github.com/matutetandil/marshal --tag v0.3.0
+cargo install --git https://github.com/matutetandil/marshal --tag v0.4.0
 alias git=marshal
 ```
 
@@ -35,7 +35,7 @@ Verify:
 ```sh
 $ git --version
 git version 2.50.1
-marshal version 0.3.0
+marshal version 0.4.0
 ```
 
 Run `git marshal help` for the rest of the surface.
@@ -65,5 +65,6 @@ MIT — see [`LICENSE`](LICENSE).
 | [`v0.1.0`](https://github.com/matutetandil/marshal/releases/tag/v0.1.0)                   | 2026-04-24 | Phase 0 — pure alias/passthrough.                  |
 | [`v0.2.0`](https://github.com/matutetandil/marshal/releases/tag/v0.2.0)                   | 2026-04-24 | First slice of Phase 1.                            |
 | [`v0.3.0`](https://github.com/matutetandil/marshal/releases/tag/v0.3.0)                   | 2026-04-27 | Phase 1 complete.                                  |
+| [`v0.4.0`](https://github.com/matutetandil/marshal/releases/tag/v0.4.0)                   | 2026-04-28 | Phase 2 complete — read-only workspace.            |
 
 Not yet published to crates.io. Install from source: `cargo install --git https://github.com/matutetandil/marshal --tag <tag>`.
