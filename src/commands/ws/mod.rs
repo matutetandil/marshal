@@ -38,6 +38,7 @@ mod clone;
 mod diff;
 mod init;
 mod log;
+mod restore;
 mod stage;
 mod status;
 mod unstage;
@@ -104,6 +105,16 @@ pub fn dispatch(
         // `git ws unstage <repo>` — drop the staging entry for a
         // previously-staged repo. Idempotent.
         Some("unstage") => run_command(unstage::WsUnstage { explain }, &args[1..], format),
+        // `git ws restore <repo>` — bring a child repo back to the
+        // declared branch (state.toml override or manifest default).
+        Some("restore") => run_command(
+            restore::WsRestore {
+                on: on.clone(),
+                explain,
+            },
+            &args[1..],
+            format,
+        ),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
@@ -111,8 +122,10 @@ pub fn dispatch(
                  to create one, `git ws status` for aggregated state, \
                  `git ws log` for cross-repo activity, `git ws diff` \
                  for state-declaration changes, `git ws clone <url>` \
-                 to clone a workspace, or `git ws stage <repo>` / \
-                 `git ws unstage <repo>` to manage the staging area."
+                 to clone a workspace, `git ws stage <repo>` / \
+                 `git ws unstage <repo>` to manage the staging area, \
+                 or `git ws restore <repo>` to bring a child back to \
+                 its declared branch."
             );
             Ok(ExitCode::from(2))
         }

@@ -5,6 +5,7 @@
 // and git interaction concerns.
 
 pub mod manifest;
+pub mod preflight;
 pub mod scope;
 pub mod staged;
 pub mod state;

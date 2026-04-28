@@ -194,12 +194,17 @@ fn invariant_6_read_side_ops_announce_plan_under_explain() {
     let cfg_path = cfg_dir.path().join("config.toml");
     let ws = fixture_with_one_child("alpha");
 
-    // (subcommand, extra args before --explain)
+    // (subcommand, extra args before --explain). `restore` is a
+    // write-side op but its --explain path is read-only (it does
+    // not even read the working tree), so it shares this fixture
+    // safely. We include it here so adding a new write-side op
+    // that forgets --explain breaks loudly.
     let cases: &[(&str, &[&str])] = &[
         ("status", &[]),
         ("log", &[]),
         ("diff", &[]),
         ("unstage", &["alpha"]),
+        ("restore", &["alpha"]),
     ];
 
     for (subcmd, args) in cases {
@@ -278,8 +283,9 @@ fn invariant_8_init_refuses_existing_workspace_without_force() {
 /// documentation update at the same time.
 #[test]
 fn invariant_10_unknown_ws_subcommand_error_lists_every_known_subcommand() {
-    const KNOWN_WS_SUBCOMMANDS: &[&str] =
-        &["init", "status", "log", "diff", "clone", "stage", "unstage"];
+    const KNOWN_WS_SUBCOMMANDS: &[&str] = &[
+        "init", "status", "log", "diff", "clone", "stage", "unstage", "restore",
+    ];
 
     let cfg_dir = TempDir::new().unwrap();
     let cfg_path = cfg_dir.path().join("config.toml");

@@ -4245,3 +4245,276 @@ fn ws_status_drops_staging_markers_after_unstage() {
     assert!(!stdout.contains("staged at"));
     assert!(!stdout.contains("staged for commit"));
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws restore` — Phase 3 Slice C
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Switch the seeded child repo to a non-default branch with one
+/// extra commit, leaving HEAD on that branch. Returns the path to
+/// the child for further mutations in tests.
+fn switch_child_off_default(ws: &TempDir, name: &str) -> std::path::PathBuf {
+    let child = ws.path().join("src").join(name);
+    StdCommand::new("git")
+        .current_dir(&child)
+        .args(["switch", "-q", "-c", "feat/restore-test"])
+        .status()
+        .unwrap();
+    std::fs::write(child.join("change.txt"), "x").unwrap();
+    StdCommand::new("git")
+        .current_dir(&child)
+        .args(["add", "change.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(&child)
+        .args(["commit", "-q", "-m", "feat change"])
+        .status()
+        .unwrap();
+    child
+}
+
+/// Happy path: a clean child on a non-default branch is restored
+/// to the manifest's default branch (no state.toml override here).
+#[test]
+fn ws_restore_switches_clean_child_to_declared_branch() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "alpha"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "restore failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Restored `alpha`"));
+    assert!(stdout.contains("`main`"));
+
+    // Child is on main now.
+    let head = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+}
+
+/// When the child is already on the declared branch, restore is a
+/// no-op and reports that clearly. No git operation runs.
+#[test]
+fn ws_restore_already_on_declared_branch_is_a_no_op() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "alpha"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("already on declared branch"));
+}
+
+/// A dirty child is refused without a resolution flag, with an
+/// error that lists the flags. Conservative defaults (Invariant 8).
+#[test]
+fn ws_restore_refuses_dirty_repo_without_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = ws.path().join("src").join("alpha");
+
+    // Dirty: an unstaged modification.
+    std::fs::write(alpha.join("seed.txt"), "modified").unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "alpha"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "restore should refuse a dirty repo without a resolution flag"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--auto-stash"));
+    assert!(stderr.contains("--discard-changes"));
+    assert!(stderr.contains("unstaged change"));
+}
+
+/// `--auto-stash` resolves uncommitted changes by stashing, then
+/// the switch proceeds. The stash is recoverable via `git stash pop`.
+#[test]
+fn ws_restore_auto_stash_preserves_changes_and_switches() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+    std::fs::write(alpha.join("seed.txt"), "modified").unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "alpha", "--auto-stash"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "restore --auto-stash failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("stashed"));
+
+    // Verify the stash exists and the message is marshal-flagged.
+    let stash_list = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["stash", "list"])
+        .output()
+        .unwrap();
+    let stash_text = String::from_utf8_lossy(&stash_list.stdout);
+    assert!(stash_text.contains("marshal/ws-restore"));
+}
+
+/// `--discard-changes` resets and cleans, then switches. The
+/// uncommitted changes are gone (destructive — explicit opt-in).
+#[test]
+fn ws_restore_discard_changes_resets_and_switches() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+    std::fs::write(alpha.join("seed.txt"), "modified").unwrap();
+    std::fs::write(alpha.join("untracked.txt"), "new").unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "alpha", "--discard-changes"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "restore --discard-changes failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Branch switched.
+    let head = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+
+    // Uncommitted file is gone.
+    assert!(!alpha.join("untracked.txt").exists());
+    // Tracked file is back to its committed content.
+    assert_eq!(
+        std::fs::read_to_string(alpha.join("seed.txt")).unwrap(),
+        "seed"
+    );
+}
+
+/// `--auto-stash` and `--discard-changes` are mutually exclusive.
+#[test]
+fn ws_restore_rejects_both_resolution_flags_together() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args([
+            "ws",
+            "restore",
+            "alpha",
+            "--auto-stash",
+            "--discard-changes",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("mutually exclusive"));
+}
+
+/// `--explain` describes the plan without running git or touching
+/// the working tree of the child.
+#[test]
+fn ws_restore_explain_creates_no_side_effects() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "alpha", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws restore`"));
+    // The plan line is `git -C <abs-path> switch main`. Match on
+    // `switch main` to stay path-independent.
+    assert!(
+        stdout.contains("switch main"),
+        "expected the plan to mention switch main, got:\n{stdout}"
+    );
+
+    // Child stayed on the feature branch — nothing executed.
+    let head = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&head.stdout).trim(),
+        "feat/restore-test"
+    );
+}
+
+/// Unknown repo name → error with the list of known names.
+#[test]
+fn ws_restore_with_unknown_repo_lists_known_names() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "ghost"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("'ghost'"));
+    assert!(stderr.contains("alpha"));
+    assert!(stderr.contains("beta"));
+}
+
+/// `--on <name>` is rejected: restore takes a positional. The hint
+/// shows the canonical form.
+#[test]
+fn ws_restore_rejects_on_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--on", "alpha"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ws restore alpha"));
+}
