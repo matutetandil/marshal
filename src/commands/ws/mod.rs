@@ -38,7 +38,9 @@ mod clone;
 mod diff;
 mod init;
 mod log;
+mod stage;
 mod status;
+mod unstage;
 
 /// Threshold for "show full list inline" vs "show count + interesting only".
 /// Below or equal to this, the human form expands unconditionally; above it,
@@ -96,14 +98,21 @@ pub fn dispatch(
         // `git ws clone <url> [<dest>]` — clone the workspace repo
         // and, in parallel, every child repo it declares.
         Some("clone") => run_command(clone::WsClone { explain }, &args[1..], format),
+        // `git ws stage <repo>` — capture (branch, commit) of the
+        // child repo into per-developer staging (Phase 3).
+        Some("stage") => run_command(stage::WsStage { explain }, &args[1..], format),
+        // `git ws unstage <repo>` — drop the staging entry for a
+        // previously-staged repo. Idempotent.
+        Some("unstage") => run_command(unstage::WsUnstage { explain }, &args[1..], format),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
                  Run `git ws` for the workspace context, `git ws init` \
                  to create one, `git ws status` for aggregated state, \
                  `git ws log` for cross-repo activity, `git ws diff` \
-                 for state-declaration changes, or `git ws clone <url>` \
-                 to clone a workspace and its child repos."
+                 for state-declaration changes, `git ws clone <url>` \
+                 to clone a workspace, or `git ws stage <repo>` / \
+                 `git ws unstage <repo>` to manage the staging area."
             );
             Ok(ExitCode::from(2))
         }

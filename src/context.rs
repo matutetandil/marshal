@@ -24,7 +24,7 @@ pub const MANIFEST_FILE: &str = "manifest.toml";
 pub const STATE_FILE: &str = "state.toml";
 
 /// The local (gitignored) subdirectory for per-developer state.
-#[allow(dead_code)] // Consumed by the staging slice (Phase 3).
+/// Consumed by `crate::workspace::staged` for `staged.toml`.
 pub const LOCAL_DIR: &str = "local";
 
 /// A detected workspace context.

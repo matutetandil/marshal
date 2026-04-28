@@ -6,6 +6,7 @@
 
 pub mod manifest;
 pub mod scope;
+pub mod staged;
 pub mod state;
 
 pub use manifest::Manifest;

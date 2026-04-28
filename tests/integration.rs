@@ -3796,3 +3796,274 @@ fn ws_clone_without_url_errors_clearly() {
         "expected missing-url hint, got: {stderr}"
     );
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws stage` / `ws unstage` — Phase 3 staging area (Slice A)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Build a minimal but realistic staging fixture: a `.workspace/`
+/// with a manifest declaring `count` child repos, plus a real on-disk
+/// child repo per declared name (each repo seeded with one commit on
+/// `main`). Returns the temp dir owning the tree. Centralises a
+/// shape that every staging test below needs.
+fn make_staging_fixture(child_names: &[&str]) -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    let mut manifest =
+        String::from("[workspace]\nname = \"stagedemo\"\ndefault_branch = \"main\"\n\n");
+    for name in child_names {
+        manifest.push_str(&format!(
+            "[[repos]]\nname = \"{name}\"\nurl = \"git@example.com:{name}.git\"\n\n"
+        ));
+    }
+    let workspace_dir = root.join(".workspace");
+    std::fs::create_dir(&workspace_dir).unwrap();
+    std::fs::write(workspace_dir.join("manifest.toml"), manifest).unwrap();
+
+    for name in child_names {
+        init_child_repo(&root.join("src").join(name));
+    }
+    tmp
+}
+
+/// Switch the given child repo to a non-default branch with one
+/// extra commit. Used to verify that `ws stage` captures the
+/// non-default branch + the new commit, rather than whatever was
+/// HEAD when the repo was seeded.
+fn switch_child_to_branch(child: &std::path::Path, branch: &str) -> String {
+    StdCommand::new("git")
+        .current_dir(child)
+        .args(["switch", "-q", "-c", branch])
+        .status()
+        .unwrap();
+    std::fs::write(child.join("change.txt"), "x").unwrap();
+    StdCommand::new("git")
+        .current_dir(child)
+        .args(["add", "change.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(child)
+        .args(["commit", "-q", "-m", "branch change"])
+        .status()
+        .unwrap();
+    let out = StdCommand::new("git")
+        .current_dir(child)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Happy path: `ws stage <repo>` writes `.workspace/local/staged.toml`
+/// with the child's current `(branch, commit)` and seeds the
+/// `.gitignore` so per-developer staging never leaks into the
+/// workspace repo's history.
+#[test]
+fn ws_stage_writes_snapshot_and_seeds_gitignore() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = ws.path().join("src").join("alpha");
+    let head_sha = switch_child_to_branch(&alpha, "feat/x");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stage failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Staged `alpha`"));
+    assert!(stdout.contains("`feat/x`"));
+
+    // The on-disk artefacts are exactly what we promised.
+    let local = ws.path().join(".workspace").join("local");
+    let staged = std::fs::read_to_string(local.join("staged.toml")).unwrap();
+    assert!(staged.contains("[repos.alpha]"));
+    assert!(staged.contains("branch = \"feat/x\""));
+    assert!(staged.contains(&format!("commit = \"{head_sha}\"")));
+    assert_eq!(
+        std::fs::read_to_string(local.join(".gitignore")).unwrap(),
+        "*\n"
+    );
+}
+
+/// Re-staging the same repo overwrites the previous snapshot and
+/// the JSON form surfaces the replaced entry. Mirrors `git add`'s
+/// re-staging-refreshes-content behaviour.
+#[test]
+fn ws_stage_re_stage_overwrites_and_reports_previous() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = ws.path().join("src").join("alpha");
+
+    // First stage: still on main, the seeded commit.
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .assert()
+        .success();
+
+    // Move the child to a different branch, re-stage.
+    let new_sha = switch_child_to_branch(&alpha, "feat/x");
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["snapshot"]["branch"], "feat/x");
+    assert_eq!(parsed["snapshot"]["commit"], new_sha);
+    // The previous snapshot is the main-branch HEAD we captured first.
+    assert_eq!(parsed["previous_snapshot"]["branch"], "main");
+}
+
+/// `ws stage <bogus-repo>` errors with the list of known names —
+/// same pattern as `--on bogus`. The user always sees a path to the
+/// fix without leaving the terminal.
+#[test]
+fn ws_stage_with_unknown_repo_errors_with_known_list() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "missing"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("'missing'"));
+    assert!(stderr.contains("does not match any repo"));
+    assert!(stderr.contains("alpha"));
+    assert!(stderr.contains("beta"));
+}
+
+/// `ws stage --explain` is a dry run: it lists the planned shellouts
+/// and writes nothing. Same safety property as `ws init --explain`.
+#[test]
+fn ws_stage_explain_does_not_write() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws stage`"));
+    assert!(stdout.contains("rev-parse HEAD"));
+
+    // The two on-disk artefacts that the real run would produce: neither exists.
+    let local = ws.path().join(".workspace").join("local");
+    assert!(!local.join("staged.toml").exists());
+    assert!(!local.join(".gitignore").exists());
+}
+
+/// `ws stage` against a child repo that has no commits yet refuses
+/// with a clear hint. Snapshotting needs a HEAD to point at.
+#[test]
+fn ws_stage_refuses_when_child_has_no_commits() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&[]);
+
+    // Manifest declares `alpha`, but we put a fresh `git init` on disk
+    // (no commits), bypassing the helper that seeds one.
+    std::fs::write(
+        ws.path().join(".workspace").join("manifest.toml"),
+        "[workspace]\nname = \"x\"\ndefault_branch = \"main\"\n\n\
+         [[repos]]\nname = \"alpha\"\nurl = \"git@x:a.git\"\n",
+    )
+    .unwrap();
+    let alpha = ws.path().join("src").join("alpha");
+    std::fs::create_dir_all(&alpha).unwrap();
+    StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no commits yet"),
+        "expected no-commits hint, got: {stderr}"
+    );
+}
+
+/// `ws unstage <repo>` removes the entry and reports what was
+/// dropped. A second `ws unstage` of the same repo is idempotent
+/// and prints the "nothing to do" line — no error.
+#[test]
+fn ws_unstage_removes_entry_then_idempotent() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "stage", "alpha"])
+        .assert()
+        .success();
+
+    // First unstage: removes the entry, reports the drop.
+    let first = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "unstage", "alpha", "--json"])
+        .output()
+        .unwrap();
+    assert!(first.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(parsed["was_staged"], true);
+    assert_eq!(parsed["removed"]["branch"], "main");
+
+    // Second unstage: nothing to do, still exit 0.
+    let second = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "unstage", "alpha"])
+        .output()
+        .unwrap();
+    assert!(second.status.success());
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("was not staged"));
+}
+
+/// `ws unstage` of a never-staged repo is a benign no-op (matches
+/// how `git restore --staged <unstaged-path>` behaves). The repo
+/// must still be declared in the manifest, though — typo protection
+/// is more useful than literalism here.
+#[test]
+fn ws_unstage_unknown_repo_errors_like_stage() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "unstage", "ghost"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("'ghost'"));
+    assert!(stderr.contains("does not match any repo"));
+    assert!(stderr.contains("alpha"));
+}

@@ -53,8 +53,9 @@ pub fn is_dirty(repo: &Path) -> Result<bool> {
     Ok(!out.stdout.is_empty())
 }
 
-/// Get the commit hash that a ref points to.
-#[allow(dead_code)] // Consumed by workspace-aware commands starting in Phase 2.
+/// Get the commit hash that a ref points to. Consumed by `ws stage`
+/// (Phase 3) to snapshot HEAD; future commands (`ws commit`,
+/// `ws restore`) will reuse it.
 pub fn rev_parse(repo: &Path, reference: &str) -> Result<String> {
     let out = run(repo, &["rev-parse", reference])?;
     if !out.status.success() {
