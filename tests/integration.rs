@@ -2440,6 +2440,276 @@ branch = "main"
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Scope inference + `--on` (Slice H)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `ws log` inside a child repo narrows to that repo by spatial
+/// inference — without the user passing `--on`.
+#[test]
+fn ws_log_inside_child_repo_narrows_via_spatial_inference() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("alpha"), "a", 2);
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("beta"), "b", 2);
+
+    // Cwd inside alpha → only alpha's commits should appear.
+    let inside_alpha = ws.path().join("src").join("alpha");
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&inside_alpha)
+        .args(["ws", "log"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("a: change"),
+        "expected alpha commits, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("b: change"),
+        "beta commits leaked into spatial-narrowed log: {stdout}"
+    );
+}
+
+/// At the workspace root, `ws log` is workspace-wide (no spatial
+/// narrowing). Sanity check that the spatial-fallback policy falls
+/// back to "all" when there's no current repo.
+#[test]
+fn ws_log_at_workspace_root_remains_workspace_wide() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("alpha"), "a", 1);
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("beta"), "b", 1);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "log"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("a: change"));
+    assert!(stdout.contains("b: change"));
+}
+
+/// `--on <name>` overrides spatial inference: even from inside
+/// alpha, `--on beta` returns beta's commits.
+#[test]
+fn ws_log_on_flag_overrides_spatial_inference() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("alpha"), "a", 1);
+    init_child_repo_with_dated_commits(&ws.path().join("src").join("beta"), "b", 1);
+
+    let inside_alpha = ws.path().join("src").join("alpha");
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(&inside_alpha)
+        .args(["ws", "log", "--on", "beta"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("b: change") && !stdout.contains("a: change"),
+        "expected --on to override spatial, got: {stdout}"
+    );
+}
+
+/// `ws status --on <name>` filters the repos list to one entry.
+#[test]
+fn ws_status_on_flag_filters_to_single_repo() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+    init_child_repo(&ws.path().join("src").join("alpha"));
+    init_child_repo(&ws.path().join("src").join("beta"));
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--on", "alpha"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alpha"));
+    assert!(
+        !stdout.contains("beta"),
+        "beta leaked into --on alpha output: {stdout}"
+    );
+    // Header reports the filtered repos count.
+    assert!(stdout.contains("1 repos declared"));
+}
+
+/// `ws diff --on <name>` filters the changes list to entries
+/// matching that repo.
+#[test]
+fn ws_diff_on_flag_filters_change_list() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_committed_workspace(
+        r#"[repos."alpha"]
+branch = "main"
+
+[repos."beta"]
+branch = "main"
+"#,
+        r#"[workspace]
+name = "demo"
+
+[[repos]]
+name = "alpha"
+url = "git@example.com:alpha.git"
+
+[[repos]]
+name = "beta"
+url = "git@example.com:beta.git"
+"#,
+    );
+    // Modify both repos' state.
+    std::fs::write(
+        ws.path().join(".workspace").join("state.toml"),
+        r#"[repos."alpha"]
+branch = "feat/alpha"
+
+[repos."beta"]
+branch = "feat/beta"
+"#,
+    )
+    .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "diff", "--on", "beta"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("beta") && stdout.contains("`main` → `feat/beta`"),
+        "expected beta change, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("`main` → `feat/alpha`"),
+        "alpha change leaked into --on beta diff: {stdout}"
+    );
+}
+
+/// `--on <unknown>` errors helpfully and lists the known repos.
+#[test]
+fn on_flag_with_unknown_repo_errors_with_known_list() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+
+        [[repos]]
+        name = "beta"
+        url = "git@example.com:beta.git"
+        "#,
+    );
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--on", "bogus"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("'bogus'") && stderr.contains("alpha") && stderr.contains("beta"),
+        "expected error naming bogus and listing known repos, got: {stderr}"
+    );
+}
+
+/// `--on=<name>` (equals form) is also accepted.
+#[test]
+fn on_flag_equals_form_works() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_workspace_with_manifest(
+        r#"
+        [workspace]
+        name = "demo"
+
+        [[repos]]
+        name = "alpha"
+        url = "git@example.com:alpha.git"
+        "#,
+    );
+    init_child_repo(&ws.path().join("src").join("alpha"));
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "status", "--on=alpha"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("alpha"));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // `marshal help`
 // ───────────────────────────────────────────────────────────────────────────
 

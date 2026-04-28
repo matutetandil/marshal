@@ -1,32 +1,48 @@
 //! Scope inference.
 //!
 //! Operations apply to a set of child repos. Which repos? That's the scope.
-//! The scope is inferred from context unless explicitly overridden with --on.
+//! The scope is inferred from context unless explicitly overridden with `--on`.
 //!
 //! Each operation has a declared "scope policy" describing how to infer its
 //! default scope. This is part of the design, not implementation detail.
 //!
 //! See ARCHITECTURE.md § "Scope Inference" for the conceptual model.
 //!
-//! Scaffolded for Phase 2; not consumed by `main` in 0.1.0.
+//! Phase 2 / Slice H makes this live: `ws status` (full_workspace),
+//! `ws log` (spatial_fallback), and `ws diff` (full_workspace) all
+//! consume `infer()` to compute their per-invocation scope.
+//! Phase 3+ commands will use the material/structural/temporal
+//! policies that the scaffold already supports.
+//!
+//! `Material`, `Temporal`, and `Structural` dimensions kept silenced
+//! per-variant until the commands that need them ship — every
+//! consumer in Slice H only uses `Spatial` (and the no-dimension
+//! "full workspace" case).
 
-#![allow(dead_code)]
+use anyhow::{bail, Result};
 
 use crate::workspace::manifest::Manifest;
+use crate::workspace::state::StateDeclaration;
 
-/// The dimensions along which scope can be inferred.
+/// The dimensions along which scope can be inferred. `Spatial` is
+/// live in Phase 2; the other three are scaffolded for the
+/// commands that consume them in Phase 3+ and stay silenced until
+/// then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dimension {
     /// Where the developer's current directory is.
     Spatial,
 
     /// Which repos have actual file modifications.
+    #[allow(dead_code)] // Consumed by `commit`, `test` (Phase 3+).
     Material,
 
     /// What the current workspace branch declares.
+    #[allow(dead_code)] // Consumed by `switch`, `push` (Phase 3+).
     Temporal,
 
     /// Affinities from the manifest.
+    #[allow(dead_code)] // Consumed by `pull`, `test` (Phase 3+).
     Structural,
 }
 
@@ -36,8 +52,13 @@ pub struct ScopePolicy {
     /// Primary dimensions used to infer scope.
     pub dimensions: Vec<Dimension>,
 
-    /// Whether the policy is restrictive (more dimensions narrow the scope)
-    /// or permissive (any matching dimension includes the repo).
+    /// Whether the policy is restrictive (more dimensions narrow the
+    /// scope) or permissive (any matching dimension includes the
+    /// repo). Currently not consulted by `infer()` — every Phase 2
+    /// policy uses the default behaviour. Kept on the struct so
+    /// adding a permissive policy in Phase 3+ does not require a
+    /// trait change.
+    #[allow(dead_code)] // Consumed by Phase 3+ permissive policies.
     pub restrictive: bool,
 }
 
@@ -59,6 +80,7 @@ impl ScopePolicy {
     }
 
     /// Policy for `commit`: material, limited by spatial.
+    #[allow(dead_code)] // Consumed by `ws commit` (Phase 3).
     pub fn material_limited_by_spatial() -> Self {
         Self {
             dimensions: vec![Dimension::Material, Dimension::Spatial],
@@ -67,6 +89,7 @@ impl ScopePolicy {
     }
 
     /// Policy for `switch`: temporal (what the branch declares).
+    #[allow(dead_code)] // Consumed by `ws switch` (Phase 3).
     pub fn temporal() -> Self {
         Self {
             dimensions: vec![Dimension::Temporal],
@@ -75,6 +98,7 @@ impl ScopePolicy {
     }
 
     /// Policy for `push`: material and temporal (repos with unpushed commits).
+    #[allow(dead_code)] // Consumed by `ws push` (Phase 4).
     pub fn material_and_temporal() -> Self {
         Self {
             dimensions: vec![Dimension::Material, Dimension::Temporal],
@@ -83,6 +107,7 @@ impl ScopePolicy {
     }
 
     /// Policy for `pull`: full workspace with structural ordering.
+    #[allow(dead_code)] // Consumed by `ws pull` (Phase 4).
     pub fn full_with_structural_ordering() -> Self {
         Self {
             dimensions: vec![Dimension::Structural],
@@ -91,6 +116,7 @@ impl ScopePolicy {
     }
 
     /// Policy for `test`: material plus structural dependents.
+    #[allow(dead_code)] // Consumed by `ws test` (Phase 5).
     pub fn material_plus_dependents() -> Self {
         Self {
             dimensions: vec![Dimension::Material, Dimension::Structural],
@@ -123,6 +149,52 @@ pub fn infer(policy: &ScopePolicy, ctx: &InferenceContext) -> Vec<String> {
     }
 
     candidates
+}
+
+/// Single entry point used by every workspace command that needs
+/// to know "which repos do I operate on?". Encapsulates the two
+/// branching cases:
+///
+///   * The user passed `--on <name>` (declared scope) — return
+///     `vec![name]`, after validating that the name appears in the
+///     manifest. Returns an `Err` with the list of known repos when
+///     the override does not match.
+///   * No `--on` — fall through to `infer(policy, ctx)` with the
+///     command's policy and the runtime context.
+///
+/// `dirty_repos` is `&[]` for Phase 2 commands (none of them use
+/// the `Material` dimension); Phase 3+ callers will pass a real
+/// list.
+pub fn resolve(
+    on: Option<&str>,
+    manifest: &Manifest,
+    state: &StateDeclaration,
+    current_repo: Option<&str>,
+    policy: ScopePolicy,
+) -> Result<Vec<String>> {
+    if let Some(name) = on {
+        if manifest.find_repo(name).is_none() {
+            let known: Vec<&str> = manifest.repos.iter().map(|r| r.name.as_str()).collect();
+            if known.is_empty() {
+                bail!(
+                    "--on '{name}' does not match any repo (the manifest has no repos declared)."
+                );
+            }
+            bail!(
+                "--on '{name}' does not match any repo declared in the manifest. \
+                 Known: {}.",
+                known.join(", ")
+            );
+        }
+        return Ok(vec![name.to_string()]);
+    }
+    let ctx = InferenceContext {
+        manifest,
+        current_repo,
+        dirty_repos: &[],
+        declared_state: state,
+    };
+    Ok(infer(&policy, &ctx))
 }
 
 fn apply_dimension(dim: Dimension, candidates: Vec<String>, ctx: &InferenceContext) -> Vec<String> {

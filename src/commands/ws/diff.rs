@@ -37,9 +37,16 @@ use std::process::Command as ProcessCommand;
 use crate::cli::{Command, Renderable};
 use crate::context::{self, STATE_FILE, WORKSPACE_MARKER};
 use crate::workspace::manifest::Manifest;
+use crate::workspace::scope::{self, ScopePolicy};
 use crate::workspace::state::StateDeclaration;
 
-pub struct WsDiff;
+pub struct WsDiff {
+    /// `--on <name>` from the dispatcher. When set, the change
+    /// list is filtered to only entries whose repo name matches.
+    /// Validated against the manifest's declared repos before
+    /// running so a typo errors out clearly.
+    pub on: Option<String>,
+}
 
 impl Command for WsDiff {
     type Output = WsDiffOutput;
@@ -79,7 +86,21 @@ impl Command for WsDiff {
         // "empty at HEAD" — current entries then read as additions.
         let head = load_state_at_head(&ctx.root)?;
 
-        let changes = compute_changes(&head, &current);
+        // Validate `--on` against the manifest. We don't need
+        // `infer()` here — the diff is naturally "across all
+        // declared state", and `--on` filters the result list.
+        let scope = scope::resolve(
+            self.on.as_deref(),
+            &manifest,
+            &current,
+            ctx.current_repo.as_deref(),
+            ScopePolicy::full_workspace(),
+        )?;
+
+        let mut changes = compute_changes(&head, &current);
+        if self.on.is_some() {
+            changes.retain(|c| scope.contains(&c.name().to_string()));
+        }
 
         Ok(WsDiffOutput {
             workspace: WorkspaceInfo {

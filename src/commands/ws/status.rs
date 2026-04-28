@@ -23,6 +23,7 @@ use crate::cli::{Command, Renderable};
 use crate::context;
 use crate::git::porcelain::{InProgressOp, RepoState};
 use crate::workspace::manifest::Manifest;
+use crate::workspace::scope::{self, ScopePolicy};
 use crate::workspace::state::StateDeclaration;
 
 /// Threshold for "show full list inline" vs "list interesting + count
@@ -32,10 +33,11 @@ use crate::workspace::state::StateDeclaration;
 const ABBREVIATE_THRESHOLD: usize = 5;
 
 /// `git ws status` — aggregated workspace status. The `all` field
-/// encodes the global `--all` flag and toggles hide-boring vs
-/// full-expansion in the renderer (Slice E2b).
+/// encodes the global `--all` flag (hide-boring vs full-expansion);
+/// `on` carries the global `--on <name>` declared-scope override.
 pub struct WsStatus {
     pub all: bool,
+    pub on: Option<String>,
 }
 
 impl Command for WsStatus {
@@ -72,9 +74,24 @@ impl Command for WsStatus {
             default_branch: manifest.workspace.default_branch.clone(),
         };
 
+        // Compute the scope: full workspace by default, or the
+        // explicit `--on <name>` if the user provided one. ws
+        // status uses the full-workspace policy (no spatial
+        // narrowing); only an explicit override changes the set.
+        let empty_state = StateDeclaration::default();
+        let state_for_scope = state.as_ref().unwrap_or(&empty_state);
+        let scope = scope::resolve(
+            self.on.as_deref(),
+            &manifest,
+            state_for_scope,
+            ctx.current_repo.as_deref(),
+            ScopePolicy::full_workspace(),
+        )?;
+
         let repos = manifest
             .repos
             .iter()
+            .filter(|repo| scope.contains(&repo.name))
             .map(|repo| {
                 let rel_path = repo
                     .path

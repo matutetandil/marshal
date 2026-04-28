@@ -45,20 +45,47 @@ mod status;
 const ABBREVIATE_THRESHOLD: usize = 5;
 
 /// Entry point invoked by `cli::dispatch_ws` when the user types
-/// `git ws <…>`. Receives every arg past the literal `ws` token, plus
-/// the global `--all` flag and the active output format.
-pub fn dispatch(args: &[OsString], all: bool, format: OutputFormat) -> Result<ExitCode> {
+/// `git ws <…>`. Receives every arg past the literal `ws` token,
+/// plus the global flags (`--all`, `--on <name>`) and the active
+/// output format.
+pub fn dispatch(
+    args: &[OsString],
+    all: bool,
+    on: Option<String>,
+    format: OutputFormat,
+) -> Result<ExitCode> {
     match args.first().and_then(|s| s.to_str()) {
         // Bare `git ws` — print the current workspace context.
+        // Doesn't consult --on (it's a context display, not an
+        // operation across repos).
         None => run_command(WsContextInfo { all }, args, format),
         // `git ws init` — create a `.workspace/` directory here.
+        // Doesn't consult --on either; it operates on the cwd.
         Some("init") => run_command(init::WsInit, &args[1..], format),
-        // `git ws status` — aggregated read-only view across child repos.
-        Some("status") => run_command(status::WsStatus { all }, &args[1..], format),
-        // `git ws log` — aggregated commit log across child repos.
-        Some("log") => run_command(log::WsLog { all }, &args[1..], format),
-        // `git ws diff` — semantic interpretation of state.toml changes.
-        Some("diff") => run_command(diff::WsDiff, &args[1..], format),
+        // `git ws status` — aggregated read-only view. Honours
+        // `--on` as a declared-scope filter.
+        Some("status") => run_command(
+            status::WsStatus {
+                all,
+                on: on.clone(),
+            },
+            &args[1..],
+            format,
+        ),
+        // `git ws log` — aggregated commit log. Spatial-fallback
+        // policy when `--on` is absent (inside a child repo, scope
+        // narrows to that repo).
+        Some("log") => run_command(
+            log::WsLog {
+                all,
+                on: on.clone(),
+            },
+            &args[1..],
+            format,
+        ),
+        // `git ws diff` — semantic state.toml changes. Honours
+        // `--on` as a declared-scope filter on the change list.
+        Some("diff") => run_command(diff::WsDiff { on: on.clone() }, &args[1..], format),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \

@@ -29,6 +29,8 @@ use std::process::Command as ProcessCommand;
 use crate::cli::{Command, Renderable};
 use crate::context;
 use crate::workspace::manifest::Manifest;
+use crate::workspace::scope::{self, ScopePolicy};
+use crate::workspace::state::StateDeclaration;
 
 /// Default cap on commits returned (and per-repo cap when fetching).
 /// Mathematically: the global top-N must be among each repo's top-N
@@ -42,6 +44,11 @@ pub struct WsLog {
     /// repo. Without it, both per-repo fetch and global cap default
     /// to [`DEFAULT_LIMIT`] (overridable with `-n` / `--limit`).
     pub all: bool,
+    /// `--on <name>` from the dispatcher — declared-scope override.
+    /// When `None`, the spatial-fallback policy applies: inside a
+    /// child repo (cwd matches `<root>/src/<name>/…`), narrow the
+    /// log to that one. Otherwise the full workspace.
+    pub on: Option<String>,
 }
 
 impl Command for WsLog {
@@ -77,11 +84,22 @@ impl Command for WsLog {
             Some(parsed.limit.unwrap_or(DEFAULT_LIMIT))
         };
 
-        // Fetch every declared repo's recent commits (skip missing).
+        // Resolve the scope: spatial-fallback policy by default
+        // (inside a child repo, narrow to that one), or the
+        // explicit `--on <name>` override.
+        let scope = scope::resolve(
+            self.on.as_deref(),
+            &manifest,
+            &StateDeclaration::default(),
+            ctx.current_repo.as_deref(),
+            ScopePolicy::spatial_fallback(),
+        )?;
+
+        // Fetch every in-scope repo's recent commits (skip missing).
         let mut entries: Vec<LogEntry> = Vec::new();
         let mut repos_with_data = 0usize;
 
-        for repo in &manifest.repos {
+        for repo in manifest.repos.iter().filter(|r| scope.contains(&r.name)) {
             let rel_path = repo
                 .path
                 .clone()

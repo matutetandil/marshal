@@ -146,16 +146,18 @@ pub fn dispatch_marshal(args: &[OsString]) -> Result<ExitCode> {
 /// Dispatch the argv that came *after* the literal `ws` token.
 ///
 /// Sibling to [`dispatch_marshal`] — separate top-level namespace
-/// for workspace operations. `--json` and `--all` are extracted
-/// here and the resulting flags are threaded to every workspace
-/// subcommand. `--all` follows the universal "hide-boring +
-/// `--all` to expand" rule documented for workspace commands:
-/// every command picks its own definition of "boring" but obeys
-/// the same flag.
+/// for workspace operations. `--json`, `--all`, and `--on <name>`
+/// are extracted here and threaded to every workspace subcommand.
+/// `--on` is the "declared scope" override from ARCHITECTURE.md's
+/// scope-inference model: the user explicitly names the repo to
+/// operate on. Without it, each command falls back to its own
+/// scope policy (spatial for `ws log`, full-workspace for `ws
+/// status` and `ws diff`).
 pub fn dispatch_ws(args: &[OsString]) -> Result<ExitCode> {
     let (format, args) = extract_json_flag(args);
     let (all, args) = extract_all_flag(&args);
-    crate::commands::ws::dispatch(args.as_slice(), all, format)
+    let (on, args) = extract_on_flag(&args)?;
+    crate::commands::ws::dispatch(args.as_slice(), all, on, format)
 }
 
 /// Strip `--all` from `args` (anywhere in the slice — global flag
@@ -175,6 +177,58 @@ fn extract_all_flag(args: &[OsString]) -> (bool, Vec<OsString>) {
         }
     }
     (all, filtered)
+}
+
+/// Strip `--on <name>` (or `--on=<name>`) from `args`, returning
+/// the optional repo name plus the filtered argv. Used by
+/// [`dispatch_ws`] for declared-scope override per ARCHITECTURE.md.
+///
+/// Errors when the flag is repeated or its value is missing /
+/// not UTF-8. The flag's value is required to be a `&str` because
+/// it has to round-trip through manifest lookups; non-UTF-8 names
+/// would be a configuration error in the manifest itself.
+fn extract_on_flag(args: &[OsString]) -> Result<(Option<String>, Vec<OsString>)> {
+    use std::ffi::OsStr;
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut on: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        let bytes = arg.as_os_str();
+        if bytes == OsStr::new("--on") {
+            // `--on <value>` separated form.
+            let value = args
+                .get(i + 1)
+                .ok_or_else(|| anyhow::anyhow!("'--on' expects a value (e.g. `--on service-a`)"))?;
+            let s = value
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("'--on' value is not valid UTF-8"))?;
+            assign_on(&mut on, s)?;
+            i += 2;
+            continue;
+        }
+        if let Some(s) = arg.to_str() {
+            if let Some(value) = s.strip_prefix("--on=") {
+                assign_on(&mut on, value)?;
+                i += 1;
+                continue;
+            }
+        }
+        filtered.push(arg.clone());
+        i += 1;
+    }
+    Ok((on, filtered))
+}
+
+fn assign_on(slot: &mut Option<String>, value: &str) -> Result<()> {
+    if slot.is_some() {
+        anyhow::bail!("'--on' specified more than once");
+    }
+    if value.is_empty() {
+        anyhow::bail!("'--on' expects a non-empty repo name");
+    }
+    *slot = Some(value.to_string());
+    Ok(())
 }
 
 /// Strip `--json` from `args` (anywhere in the slice — global flag
