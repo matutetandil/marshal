@@ -14,6 +14,27 @@ the `--explain` flag, `ws clone`. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
 
+- **`ws diff`.** Third aggregated read-only command. Compares the
+  working-tree `state.toml` against the version at `HEAD` and
+  translates the difference into per-repo "added / removed /
+  changed" entries — domain-aware interpretation rather than the
+  raw TOML hunk `git diff` would show.
+  - Output renders with per-line symbol prefixes:
+    `~ service-a   \`main\` → \`feat/payment\``,
+    `+ service-c   declared on \`feat/api\``,
+    `- service-b   declaration removed (was \`main\`)`.
+  - Empty-changes case: "No state declarations changed since HEAD."
+    plus a pointer to plain `git diff` for non-state files.
+  - Graceful degrade: no commits yet, no state.toml at HEAD, or
+    the root not being a git repo all collapse to "empty at HEAD"
+    — every current entry reads as an addition.
+  - JSON form uses a tagged enum: each `StateChange` carries a
+    `kind` field (`"added"` / `"removed"` / `"changed"`) and the
+    per-variant fields side-by-side. Single-switch consumption.
+  - Marshal deliberately does not reimplement plain `git diff`
+    for the rest of the workspace files — `cd <root> && git diff`
+    is the right tool for manifest.toml / Dockerfile / README diffs.
+
 - **`ws log`.** Second aggregated read-only command. Walks every
   declared child repo, runs `git -C <path> log --pretty=… -n N`,
   parses tab-separated entries (hash, ISO author date, author,

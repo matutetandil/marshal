@@ -122,7 +122,14 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
   it. Per-repo log via `cd src/<repo> && git log` (passthrough);
   the "context-aware" half (inside a child, behave like git log of
   that repo) waits for the scope inference engine.
-- [ ] Workspace diff: diff of workspace repo, semantic interpretation of state.toml changes
+- [x] Workspace diff: semantic interpretation of state.toml changes.
+  `git ws diff` compares the working-tree `state.toml` against the
+  version at `HEAD` and translates the difference into per-repo
+  "added / removed / changed" entries. Graceful degrade for
+  no-HEAD cases. Tagged-enum JSON shape (`{kind, name, …}`). Raw
+  file diffs of manifest.toml / Dockerfile / README are intentionally
+  left to `cd <root> && git diff` — Marshal only reimplements the
+  bits where domain interpretation adds value over plain git output.
 - [ ] Scope inference engine
 - [ ] `--explain` flag implementation
 
