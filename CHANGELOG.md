@@ -7,22 +7,77 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
-the three zones: declared / staged / working). Seven slices
+the three zones: declared / staged / working). Eight slices
 shipped: the per-developer staging area (`ws add` /
 `ws unstage`, Slice A), its surfacing through `ws status`
 (Slice B), the first child-working-tree-write command
 (`ws restore`, Slice C), the "clear all" counterpart
 (`ws reset`, Slice D), the rename of `ws stage` to `ws add` for
 git-recursive consistency (Slice D.5), the workspace commit
-(`ws commit`, Slice E), and the workspace branch (`ws branch`,
-Slice F — thin), plus a `tests/invariants.rs` meta-test crate
+(`ws commit`, Slice E), the workspace branch (`ws branch`,
+Slice F — thin), and the workspace-aware switch (`ws switch`,
+Slice G), plus a `tests/invariants.rs` meta-test crate
 (Slice B.5) that guards the auto-checkable invariants from
-`docs/PRINCIPLES.md`. Next: `ws switch` (Slice G), the granular-
-scope variant of `ws branch` (Slice F.5), and the pre-flight +
-parallel-execution refactor (Slice H). See
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+`docs/PRINCIPLES.md`. Next: the granular-scope variant of
+`ws branch` (Slice F.5) and the pre-flight + parallel-execution
+refactor (Slice H). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
+
+- **`ws switch <name>` (Slice G).** The workspace-level analogue
+  of `git switch <branch>`. Switches the workspace-repo and
+  **materialises** the resulting `state.toml` across child repos:
+  each declared child is moved to the branch its entry pins (or
+  to the manifest's default branch when it has no entry).
+  Children already on their target branch are skipped.
+
+  This is the materialisation primitive that makes the multi-repo
+  "workspace branch" idea click. After `ws branch feature/manolo`
+  + `ws switch feature/manolo`, the new workspace branch starts
+  empty (state.toml inherited from parent); the user populates
+  it with `ws add` + `ws commit`. Subsequent
+  `ws switch main` / `ws switch feature/manolo` toggle children
+  between their per-branch declared mappings — different
+  workspace branches can pin completely different per-child
+  branch combos (alpha=main + beta=feat/payments + gamma=
+  release/2.3 vs alpha=release/2.3 + beta=release/2.4).
+
+  Behaviour:
+
+  - **Atomic pre-flight.** Reads porcelain status of the
+    workspace-repo + every affected child. If any obstacle blocks
+    a clean switch (workspace OR any child), the operation aborts
+    before mutating anything. Resolution flags `--auto-stash` and
+    `--discard-changes` apply uniformly to workspace + every
+    affected child (the user picks one stance for the whole
+    operation, mutually exclusive).
+  - **Skip-when-aligned.** A child already on its target branch
+    is reported as "skipped" without invoking git on it.
+  - **Reads target state.toml without switching.** Uses
+    `git show <target>:.workspace/state.toml` to peek at the
+    target branch's declaration before any mutation. Missing file
+    collapses to "empty state.toml on target" (every child
+    defaults to the manifest default — handles brand-new branches
+    that never had state.toml).
+  - **`-c` / `--create`** creates the workspace branch from
+    current HEAD, then switches. Mirrors `git switch -c`.
+  - **`--on <repo>`** filters which children get materialised.
+    The workspace-repo always switches; only the named child
+    moves. Useful for the equivalence-of-flows pattern from the
+    design brief (`ws switch -c fix/bug-123 --on service-b`).
+  - **Children missing on disk** are surfaced in the result (not
+    blocking) — the materialisation step skips them with a
+    footnote.
+  - `--explain` describes the plan without invoking git.
+  - JSON shape: `{root, workspace_name, target_branch,
+    workspace: {from_branch?, from_commit?, stashed, discarded,
+    created_branch}, children: [{name, path, from_branch?,
+    to_branch, skipped, missing_from_disk, stashed, discarded}]}`.
+
+  Sequential implementation for now — Slice H consolidates the
+  pre-flight Strategy + parallel-execution framework that this
+  command (and `ws clone`, `ws restore --all`, the granular-scope
+  `ws branch` from Slice F.5) will all share.
 
 - **`ws branch <name>` — thin (Slice F).** The workspace-level
   analogue of `git branch <name>`. Creates a new branch in the

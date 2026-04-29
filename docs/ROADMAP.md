@@ -241,7 +241,23 @@ The three zones, mental model:
   variant — auto-detect divergent children, create their branches,
   record in state.toml — lives in Slice F.5, post Slice H so it
   can use the parallel-execution framework.
-- [ ] Workspace switching: `ws switch <name>` with state materialization
+- [x] Workspace switching: `ws switch <name>` (Slice G) — switches
+  the workspace-repo to `<name>` (or creates + switches with
+  `-c` / `--create`) and materialises the resulting `state.toml`
+  across child repos. Each declared child is moved to the branch
+  its entry pins, or to the manifest's default branch when it has
+  no entry; children already on their target branch are skipped.
+  Atomic pre-flight: reads porcelain across workspace + every
+  affected child, aborts before mutating anything when any
+  obstacle blocks. Resolution flags `--auto-stash` and
+  `--discard-changes` apply uniformly to workspace + every
+  affected child. Reads target state.toml without switching first
+  (`git show <target>:.workspace/state.toml`); missing file
+  collapses to "empty target" so brand-new branches work.
+  `--on <repo>` filters which child materialises (workspace
+  always switches). Sequential implementation; Slice H will
+  consolidate the parallel-execution framework that `ws switch`,
+  `ws clone`, and the granular-scope `ws branch` will share.
 - [x] Pre-flight checks framework — `src/workspace/preflight.rs`
   hosts the `Obstacle` enum (tagged-enum JSON: in_progress,
   conflicts, staged_changes, unstaged_changes, untracked_files,
