@@ -236,7 +236,7 @@ fn is_boring(state: &Option<RepoState>, declared_branch: &str, has_staging: bool
 /// `true` when the staging snapshot no longer matches the working
 /// state — the user staged X, then moved to Y. Returns `false`
 /// whenever the comparison is impossible (no working state, or the
-/// repo is detached/initial — `ws stage` refuses those, but a
+/// repo is detached/initial — `ws add` refuses those, but a
 /// hand-edited `staged.toml` could still produce them).
 ///
 /// Drift is informational, not a bug: `ws commit` will write the
@@ -405,7 +405,7 @@ impl Renderable for WsStatusOutput {
                     w,
                     "  ({drifted_count} {dplural} working state has drifted from \
                      the staged snapshot. The commit will record the staged values; \
-                     re-run `ws stage <repo>` if you'd rather pin the latest state.)"
+                     re-run `ws add <repo>` if you'd rather pin the latest state.)"
                 )?;
             }
         }

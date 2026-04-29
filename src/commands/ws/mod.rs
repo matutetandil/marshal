@@ -34,13 +34,13 @@ use crate::context;
 use crate::workspace::manifest::Manifest;
 use crate::workspace::state::StateDeclaration;
 
+mod add;
 mod clone;
 mod diff;
 mod init;
 mod log;
 mod reset;
 mod restore;
-mod stage;
 mod status;
 mod unstage;
 
@@ -100,9 +100,10 @@ pub fn dispatch(
         // `git ws clone <url> [<dest>]` — clone the workspace repo
         // and, in parallel, every child repo it declares.
         Some("clone") => run_command(clone::WsClone { explain }, &args[1..], format),
-        // `git ws stage <repo>` — capture (branch, commit) of the
-        // child repo into per-developer staging (Phase 3).
-        Some("stage") => run_command(stage::WsStage { explain }, &args[1..], format),
+        // `git ws add <repo>` — capture (branch, commit) of the
+        // child repo into per-developer staging (Phase 3). The
+        // workspace-level analogue of `git add <file>`.
+        Some("add") => run_command(add::WsAdd { explain }, &args[1..], format),
         // `git ws unstage <repo>` — drop the staging entry for a
         // previously-staged repo. Idempotent.
         Some("unstage") => run_command(unstage::WsUnstage { explain }, &args[1..], format),
@@ -133,7 +134,7 @@ pub fn dispatch(
                  to create one, `git ws status` for aggregated state, \
                  `git ws log` for cross-repo activity, `git ws diff` \
                  for state-declaration changes, `git ws clone <url>` \
-                 to clone a workspace, `git ws stage <repo>` / \
+                 to clone a workspace, `git ws add <repo>` / \
                  `git ws unstage <repo>` to manage the staging area, \
                  `git ws restore <repo>` to bring a child back to \
                  its declared branch, or `git ws reset` to clear \

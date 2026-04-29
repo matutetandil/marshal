@@ -174,7 +174,7 @@ Users who want the wrapper to silently substitute modern equivalents can opt in 
 
 The three zones, mental model:
 - **Working** — what every child repo's HEAD actually is right now.
-- **Staged** — `.workspace/local/staged.toml`, populated by `ws stage`.
+- **Staged** — `.workspace/local/staged.toml`, populated by `ws add`.
   Per-repo `(branch, commit)` snapshots taken at stage time
   (`git add`-style: re-staging refreshes the snapshot, drift in
   working trees does not propagate). Per-developer, gitignored.
@@ -182,7 +182,7 @@ The three zones, mental model:
   truth. Updated by `ws commit` (flushes staged into declared and
   clears staged).
 
-- [x] `ws stage <repo>` — capture the child's `(branch, commit)`
+- [x] `ws add <repo>` — capture the child's `(branch, commit)`
   into `.workspace/local/staged.toml` at stage time. Refuses clean
   on detached HEAD or initial-empty repos (no stable snapshot
   available). Re-staging an already-staged repo overwrites with

@@ -1,6 +1,6 @@
 //! `ws reset` — clear the per-developer staging area in one go.
 //!
-//! Counterpart to `ws stage` / `ws unstage`: those add or drop a
+//! Counterpart to `ws add` / `ws unstage`: those add or drop a
 //! single entry; `ws reset` empties the file. Useful for "I want
 //! to start over before composing the next workspace commit"
 //! workflows, the workspace-level analogue of `git reset` (the

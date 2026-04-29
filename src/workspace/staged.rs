@@ -10,14 +10,14 @@
 //! Mental model — three zones (Phase 3):
 //!
 //! * **Working** — what every child repo's HEAD actually is right now.
-//! * **Staged** — `staged.toml`, populated by `ws stage`. Per-repo
+//! * **Staged** — `staged.toml`, populated by `ws add`. Per-repo
 //!   `(branch, commit)` snapshots taken at stage time.
 //! * **Declared** — `state.toml`, the committed source-of-truth in
 //!   the workspace repo. Updated by `ws commit` (flushes staged into
 //!   declared and clears staged).
 //!
 //! The snapshot semantics match `git add` exactly: stage captures
-//! the *current* values; running `ws stage` again on the same repo
+//! the *current* values; running `ws add` again on the same repo
 //! re-snapshots; modifying the working tree of a child after stage
 //! does not change what is staged. This protects deploy-manifest
 //! atomicity — what the user tested as a coordinated set is exactly
@@ -43,7 +43,7 @@ pub const STAGED_FILE: &str = "staged.toml";
 const STAGED_FILE_HEADER: &str = "\
 # staged.toml — per-developer staging area for the workspace.
 #
-# Populated by `ws stage <repo>`; flushed into `.workspace/state.toml`
+# Populated by `ws add <repo>`; flushed into `.workspace/state.toml`
 # by `ws commit`. Do not commit this file: the parent `.workspace/local/`
 # directory is gitignored.
 #
@@ -111,7 +111,7 @@ impl StagedDeclaration {
         toml::from_str(content).context("failed to parse staging declaration TOML")
     }
 
-    /// Serialise to TOML string. Used by `ws stage` / `ws unstage`
+    /// Serialise to TOML string. Used by `ws add` / `ws unstage`
     /// to persist the in-memory state back to disk.
     pub fn to_toml(&self) -> Result<String> {
         toml::to_string_pretty(self).context("failed to serialise staging declaration")

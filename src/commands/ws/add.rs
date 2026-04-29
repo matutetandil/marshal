@@ -1,4 +1,4 @@
-//! `ws stage <repo>` — capture the current `(branch, commit)` of a
+//! `ws add <repo>` — capture the current `(branch, commit)` of a
 //! child repo into `staged.toml`.
 //!
 //! First Phase 3 command. Mirrors `git add`'s mental model:
@@ -6,7 +6,7 @@
 //! * **Snapshot at stage time.** Reads the child repo's branch and
 //!   commit *now* and stores them. Subsequent changes to the child
 //!   working tree do not propagate to the staging entry.
-//! * **Re-staging refreshes the snapshot.** Running `ws stage <repo>`
+//! * **Re-staging refreshes the snapshot.** Running `ws add <repo>`
 //!   on an already-staged repo overwrites the previous snapshot,
 //!   identical to `git add` re-staging a file's current content.
 //!
@@ -31,12 +31,12 @@ use crate::git::porcelain::RepoState;
 use crate::workspace::manifest::{Manifest, RepoEntry};
 use crate::workspace::staged::{RepoStaged, StagedDeclaration};
 
-pub struct WsStage {
+pub struct WsAdd {
     pub explain: bool,
 }
 
-impl Command for WsStage {
-    type Output = WsStageOutput;
+impl Command for WsAdd {
+    type Output = WsAddOutput;
 
     fn run(&self, args: &[OsString]) -> Result<Self::Output> {
         let repo_name = parse_args(args)?;
@@ -71,7 +71,7 @@ impl Command for WsStage {
                 format!("Known: {}.", known.join(", "))
             };
             anyhow!(
-                "ws stage: '{repo_name}' does not match any repo declared in the manifest.\n  {known_list}"
+                "ws add: '{repo_name}' does not match any repo declared in the manifest.\n  {known_list}"
             )
         })?;
 
@@ -98,7 +98,7 @@ impl Command for WsStage {
                     ctx.root.display()
                 ),
             ];
-            return Ok(WsStageOutput {
+            return Ok(WsAddOutput {
                 root: ctx.root.to_string_lossy().into_owned(),
                 repo_name,
                 snapshot: None,
@@ -112,7 +112,7 @@ impl Command for WsStage {
         // have nothing to stage.
         if !abs_path.is_dir() {
             bail!(
-                "ws stage: child repo `{repo_name}` is declared but missing on disk \
+                "ws add: child repo `{repo_name}` is declared but missing on disk \
                  (expected at {}). Clone the workspace with `ws clone` or check the \
                  manifest's `path` setting.",
                 abs_path.display()
@@ -121,7 +121,7 @@ impl Command for WsStage {
 
         let state = RepoState::detect_at(&abs_path).with_context(|| {
             format!(
-                "ws stage: failed to read state of `{repo_name}` at {}",
+                "ws add: failed to read state of `{repo_name}` at {}",
                 abs_path.display()
             )
         })?;
@@ -135,23 +135,23 @@ impl Command for WsStage {
         // *before* trying `git rev-parse HEAD`.
         if state.branch.is_initial {
             bail!(
-                "ws stage: `{repo_name}` has no commits yet. \
+                "ws add: `{repo_name}` has no commits yet. \
                  Make a first commit in the child repo, then \
-                 re-run `ws stage`."
+                 re-run `ws add`."
             );
         }
         if state.branch.is_detached {
             bail!(
-                "ws stage: `{repo_name}` is on detached HEAD. \
+                "ws add: `{repo_name}` is on detached HEAD. \
                  Switch to a branch in the child repo first \
                  (`cd {} && git switch <branch>`), then re-run \
-                 `ws stage`.",
+                 `ws add`.",
                 abs_path.display()
             );
         }
         let branch = state.branch.name.clone().ok_or_else(|| {
             anyhow!(
-                "ws stage: `{repo_name}` has no current branch \
+                "ws add: `{repo_name}` has no current branch \
                  (porcelain reported neither initial nor detached). \
                  This is a marshal bug; please report it."
             )
@@ -161,7 +161,7 @@ impl Command for WsStage {
         // means `oid` is always populated by the time we reach here.
         let commit = state.branch.oid.clone().ok_or_else(|| {
             anyhow!(
-                "ws stage: porcelain reported no HEAD oid for `{repo_name}`. \
+                "ws add: porcelain reported no HEAD oid for `{repo_name}`. \
                  This is a marshal bug; please report it."
             )
         })?;
@@ -176,7 +176,7 @@ impl Command for WsStage {
             .save_to_workspace(&ctx.root)
             .context("failed to persist staging declaration")?;
 
-        Ok(WsStageOutput {
+        Ok(WsAddOutput {
             root: ctx.root.to_string_lossy().into_owned(),
             repo_name,
             snapshot: Some(snapshot),
@@ -187,7 +187,7 @@ impl Command for WsStage {
 }
 
 #[derive(Serialize)]
-pub struct WsStageOutput {
+pub struct WsAddOutput {
     pub root: String,
     pub repo_name: String,
 
@@ -206,10 +206,10 @@ pub struct WsStageOutput {
     pub explain_plan: Option<Vec<String>>,
 }
 
-impl Renderable for WsStageOutput {
+impl Renderable for WsAddOutput {
     fn render_human(&self, w: &mut dyn Write) -> io::Result<()> {
         if let Some(plan) = &self.explain_plan {
-            return super::render_explain_plan(w, "ws stage", plan);
+            return super::render_explain_plan(w, "ws add", plan);
         }
         let snapshot = match &self.snapshot {
             Some(s) => s,
@@ -242,7 +242,7 @@ impl Renderable for WsStageOutput {
 
 // ── Argument parsing ──────────────────────────────────────────────
 
-/// `ws stage` takes exactly one positional `<repo>`. Multi-repo
+/// `ws add` takes exactly one positional `<repo>`. Multi-repo
 /// staging in one invocation is a worthwhile follow-up but waits for
 /// a real use case — for now, one repo per command keeps the error
 /// reporting and the rendering simple.
@@ -251,28 +251,28 @@ fn parse_args(args: &[OsString]) -> Result<String> {
     for arg in args {
         let s = arg.to_str().ok_or_else(|| {
             anyhow!(
-                "ws stage: argument is not valid UTF-8: {:?}",
+                "ws add: argument is not valid UTF-8: {:?}",
                 arg.to_string_lossy()
             )
         })?;
         if s.starts_with("--") {
             bail!(
-                "ws stage: unexpected flag '{s}'. \
-                 Expected: `ws stage <repo>` (with optional --explain)."
+                "ws add: unexpected flag '{s}'. \
+                 Expected: `ws add <repo>` (with optional --explain)."
             );
         }
         if repo.is_some() {
             bail!(
-                "ws stage: too many positional arguments. \
-                 Stage one repo per invocation: `ws stage <repo>`."
+                "ws add: too many positional arguments. \
+                 Stage one repo per invocation: `ws add <repo>`."
             );
         }
         repo = Some(s.to_string());
     }
     repo.ok_or_else(|| {
         anyhow!(
-            "ws stage: missing required <repo> argument. \
-             Usage: `ws stage <repo>`."
+            "ws add: missing required <repo> argument. \
+             Usage: `ws add <repo>`."
         )
     })
 }

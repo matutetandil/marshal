@@ -3798,7 +3798,7 @@ fn ws_clone_without_url_errors_clearly() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// `ws stage` / `ws unstage` — Phase 3 staging area (Slice A)
+// `ws add` / `ws unstage` — Phase 3 staging area (Slice A)
 // ───────────────────────────────────────────────────────────────────────────
 
 /// Build a minimal but realistic staging fixture: a `.workspace/`
@@ -3828,7 +3828,7 @@ fn make_staging_fixture(child_names: &[&str]) -> TempDir {
 }
 
 /// Switch the given child repo to a non-default branch with one
-/// extra commit. Used to verify that `ws stage` captures the
+/// extra commit. Used to verify that `ws add` captures the
 /// non-default branch + the new commit, rather than whatever was
 /// HEAD when the repo was seeded.
 fn switch_child_to_branch(child: &std::path::Path, branch: &str) -> String {
@@ -3856,12 +3856,12 @@ fn switch_child_to_branch(child: &std::path::Path, branch: &str) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// Happy path: `ws stage <repo>` writes `.workspace/local/staged.toml`
+/// Happy path: `ws add <repo>` writes `.workspace/local/staged.toml`
 /// with the child's current `(branch, commit)` and seeds the
 /// `.gitignore` so per-developer staging never leaks into the
 /// workspace repo's history.
 #[test]
-fn ws_stage_writes_snapshot_and_seeds_gitignore() {
+fn ws_add_writes_snapshot_and_seeds_gitignore() {
     let cfg_dir = TempDir::new().unwrap();
     let cfg_path = cfg_dir.path().join("config.toml");
     let ws = make_staging_fixture(&["alpha"]);
@@ -3870,7 +3870,7 @@ fn ws_stage_writes_snapshot_and_seeds_gitignore() {
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .output()
         .unwrap();
     assert!(
@@ -3898,7 +3898,7 @@ fn ws_stage_writes_snapshot_and_seeds_gitignore() {
 /// the JSON form surfaces the replaced entry. Mirrors `git add`'s
 /// re-staging-refreshes-content behaviour.
 #[test]
-fn ws_stage_re_stage_overwrites_and_reports_previous() {
+fn ws_add_re_stage_overwrites_and_reports_previous() {
     let cfg_dir = TempDir::new().unwrap();
     let cfg_path = cfg_dir.path().join("config.toml");
     let ws = make_staging_fixture(&["alpha"]);
@@ -3907,7 +3907,7 @@ fn ws_stage_re_stage_overwrites_and_reports_previous() {
     // First stage: still on main, the seeded commit.
     marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .assert()
         .success();
 
@@ -3915,7 +3915,7 @@ fn ws_stage_re_stage_overwrites_and_reports_previous() {
     let new_sha = switch_child_to_branch(&alpha, "feat/x");
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha", "--json"])
+        .args(["ws", "add", "alpha", "--json"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -3926,18 +3926,18 @@ fn ws_stage_re_stage_overwrites_and_reports_previous() {
     assert_eq!(parsed["previous_snapshot"]["branch"], "main");
 }
 
-/// `ws stage <bogus-repo>` errors with the list of known names —
+/// `ws add <bogus-repo>` errors with the list of known names —
 /// same pattern as `--on bogus`. The user always sees a path to the
 /// fix without leaving the terminal.
 #[test]
-fn ws_stage_with_unknown_repo_errors_with_known_list() {
+fn ws_add_with_unknown_repo_errors_with_known_list() {
     let cfg_dir = TempDir::new().unwrap();
     let cfg_path = cfg_dir.path().join("config.toml");
     let ws = make_staging_fixture(&["alpha", "beta"]);
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "missing"])
+        .args(["ws", "add", "missing"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -3948,22 +3948,22 @@ fn ws_stage_with_unknown_repo_errors_with_known_list() {
     assert!(stderr.contains("beta"));
 }
 
-/// `ws stage --explain` is a dry run: it lists the planned shellouts
+/// `ws add --explain` is a dry run: it lists the planned shellouts
 /// and writes nothing. Same safety property as `ws init --explain`.
 #[test]
-fn ws_stage_explain_does_not_write() {
+fn ws_add_explain_does_not_write() {
     let cfg_dir = TempDir::new().unwrap();
     let cfg_path = cfg_dir.path().join("config.toml");
     let ws = make_staging_fixture(&["alpha"]);
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha", "--explain"])
+        .args(["ws", "add", "alpha", "--explain"])
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Plan for `ws stage`"));
+    assert!(stdout.contains("Plan for `ws add`"));
     // Branch + HEAD oid arrive together via `status --porcelain=v2 --branch`.
     assert!(stdout.contains("status --porcelain=v2 --branch"));
 
@@ -3973,10 +3973,10 @@ fn ws_stage_explain_does_not_write() {
     assert!(!local.join(".gitignore").exists());
 }
 
-/// `ws stage` against a child repo that has no commits yet refuses
+/// `ws add` against a child repo that has no commits yet refuses
 /// with a clear hint. Snapshotting needs a HEAD to point at.
 #[test]
-fn ws_stage_refuses_when_child_has_no_commits() {
+fn ws_add_refuses_when_child_has_no_commits() {
     let cfg_dir = TempDir::new().unwrap();
     let cfg_path = cfg_dir.path().join("config.toml");
     let ws = make_staging_fixture(&[]);
@@ -3999,7 +3999,7 @@ fn ws_stage_refuses_when_child_has_no_commits() {
 
     let output = marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -4021,7 +4021,7 @@ fn ws_unstage_removes_entry_then_idempotent() {
 
     marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .assert()
         .success();
 
@@ -4073,7 +4073,7 @@ fn ws_unstage_unknown_repo_errors_like_stage() {
 // `ws status` — staging integration (Phase 3 Slice B)
 // ───────────────────────────────────────────────────────────────────────────
 
-/// After `ws stage`, `ws status` surfaces the repo with a "staged at
+/// After `ws add`, `ws status` surfaces the repo with a "staged at
 /// <branch>@<sha>" segment and the staged-count footer. The repo
 /// becomes interesting (no longer collapsible) even when its
 /// working state would otherwise read as boring.
@@ -4088,7 +4088,7 @@ fn ws_status_surfaces_staged_repo_with_summary_footer() {
     // collapse, but staging flips it to interesting.
     marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .assert()
         .success();
 
@@ -4122,7 +4122,7 @@ fn ws_status_flags_drift_when_working_state_advanced_past_staged_snapshot() {
     // Stage at the seeded HEAD on main, then move HEAD forward.
     marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .assert()
         .success();
 
@@ -4166,7 +4166,7 @@ fn ws_status_json_carries_staging_fields_only_when_applicable() {
 
     marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .assert()
         .success();
 
@@ -4226,7 +4226,7 @@ fn ws_status_drops_staging_markers_after_unstage() {
 
     marshal_with_isolated_config(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha"])
+        .args(["ws", "add", "alpha"])
         .assert()
         .success();
     marshal_with_isolated_config(&cfg_path)
@@ -4554,7 +4554,7 @@ fn ws_reset_clears_every_staged_entry_and_preserves_header() {
     for r in ["alpha", "beta"] {
         marshal_with_isolated_config(&cfg_path)
             .current_dir(ws.path())
-            .args(["ws", "stage", r])
+            .args(["ws", "add", r])
             .assert()
             .success();
     }
@@ -4616,7 +4616,7 @@ fn ws_reset_json_lists_cleared_entries_in_sorted_order() {
     for r in ["zeta", "mu", "alpha"] {
         marshal_with_isolated_config(&cfg_path)
             .current_dir(ws.path())
-            .args(["ws", "stage", r])
+            .args(["ws", "add", r])
             .assert()
             .success();
     }

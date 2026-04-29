@@ -219,14 +219,14 @@ Analogous to a Git commit. Each workspace commit tells a coherent story about th
 ```
   modify child repos  →  working state (divergence)
             ↓
-       `ws stage`        →  staging (prepared intent)
+       `ws add`          →  staging (prepared intent)
             ↓
        `ws commit`       →  workspace commit (recorded intent)
             ↓
        `git push`        →  shared with team
 ```
 
-Each transition has a Git analogue. `ws stage` ≈ `git add`. `ws unstage` ≈ `git restore --staged`. `ws restore` ≈ `git checkout <file>` (returns to declared state). `ws reset` ≈ `git reset` (clears staging).
+Each transition has a Git analogue (Git Recursive principle). `ws add` is the workspace-level `git add`. `ws unstage` is the workspace-level `git restore --staged` (we kept the friendlier verb that users typically alias git to anyway). `ws restore` is the workspace-level `git restore <file>` (returns the child to its declared state). `ws reset` is the workspace-level `git reset` (clears staging).
 
 ### Optional Engagement
 

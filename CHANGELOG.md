@@ -8,7 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
 the three zones: declared / staged / working). Four slices shipped:
-the per-developer staging area (`ws stage` / `ws unstage`, Slice A),
+the per-developer staging area (`ws add` / `ws unstage`, Slice A),
 its surfacing through `ws status` (Slice B), the first child-
 working-tree-write command (`ws restore`, Slice C), and the
 "clear all" counterpart (`ws reset`, Slice D), plus a
@@ -124,7 +124,7 @@ parallel-execution frameworks. See
     no longer matches the working state, the per-repo line gains
     "(drifted from working)" and a footer sub-line spells out the
     implication: the commit will record the staged values; re-run
-    `ws stage` to refresh. Drift is **not** a bug — it is the
+    `ws add` to refresh. Drift is **not** a bug — it is the
     snapshot semantics working as designed (deploy-manifest
     atomicity), made visible.
   - **JSON shape.** `RepoStatus` gains `staging: Option<RepoStaged>`
@@ -137,7 +137,7 @@ parallel-execution frameworks. See
 - **`BranchInfo.oid: Option<String>`.** Porcelain v2 already emitted
   `# branch.oid <hash>` but the parser only used it to detect
   `(initial)`. The hash is now captured. Two consequences:
-  - `ws stage` reads HEAD's commit from the porcelain output
+  - `ws add` reads HEAD's commit from the porcelain output
     directly — one shellout less per stage (no separate
     `git rev-parse HEAD`).
   - `ws status` can compare staging snapshots against the working
@@ -146,9 +146,9 @@ parallel-execution frameworks. See
 
 ### Added
 
-- **`ws stage <repo>` / `ws unstage <repo>`.** First Phase 3 slice:
+- **`ws add <repo>` / `ws unstage <repo>`.** First Phase 3 slice:
   per-developer staging area, the workspace's equivalent of git's
-  index. `ws stage` captures the child repo's `(branch, commit)`
+  index. `ws add` captures the child repo's `(branch, commit)`
   *at stage time* and writes it to `.workspace/local/staged.toml`;
   `ws unstage` drops the entry. `ws commit` (a later slice) will
   flush staged entries into `state.toml` and clear the staging
@@ -166,7 +166,7 @@ parallel-execution frameworks. See
     manifest with the same shape as `--on bogus`: a typo errors
     out cleanly with the list of known names.
   - **Degenerate child states are refused with a recovery hint.**
-    `ws stage` fails clearly when the child repo has no commits
+    `ws add` fails clearly when the child repo has no commits
     yet (initial-empty) or is on detached HEAD — both are states
     that staging cannot represent because they do not produce a
     stable `(branch, commit)` pair a deploy manifest could pin.

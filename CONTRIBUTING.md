@@ -34,7 +34,7 @@ Design changes without this discussion will likely be declined regardless of cod
 
 Follow Conventional Commits. Examples:
 
-- `feat(workspace): add ws stage command`
+- `feat(workspace): add ws add command`
 - `fix(scope): handle empty manifest correctly`
 - `docs: clarify invariant 5 in PRINCIPLES.md`
 - `test(status): add regression for divergence display`

@@ -434,7 +434,7 @@ impl Renderable for WsRestoreOutput {
 // ── Helpers ───────────────────────────────────────────────────────
 
 /// Where a child repo lives within the workspace tree. Mirrors the
-/// resolution used by `ws status` / `ws stage` / `ws clone`.
+/// resolution used by `ws status` / `ws add` / `ws clone`.
 fn child_repo_path(workspace_root: &Path, repo: &RepoEntry) -> PathBuf {
     let rel = match &repo.path {
         Some(p) if !p.is_empty() => p.clone(),

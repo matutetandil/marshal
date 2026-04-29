@@ -156,28 +156,28 @@ fn invariant_6_clone_explain_creates_no_dest_dir() {
     );
 }
 
-/// `ws stage <repo> --explain` does not create
+/// `ws add <repo> --explain` does not create
 /// `.workspace/local/staged.toml` or its sibling `.gitignore`.
 #[test]
-fn invariant_6_stage_explain_creates_no_staged_toml() {
+fn invariant_6_add_explain_creates_no_staged_toml() {
     let cfg_dir = TempDir::new().unwrap();
     let cfg_path = cfg_dir.path().join("config.toml");
     let ws = fixture_with_one_child("alpha");
 
     marshal_isolated(&cfg_path)
         .current_dir(ws.path())
-        .args(["ws", "stage", "alpha", "--explain"])
+        .args(["ws", "add", "alpha", "--explain"])
         .assert()
         .success();
 
     let local = ws.path().join(".workspace").join("local");
     assert!(
         !local.join("staged.toml").exists(),
-        "ws stage --explain must not create staged.toml"
+        "ws add --explain must not create staged.toml"
     );
     assert!(
         !local.join(".gitignore").exists(),
-        "ws stage --explain must not seed local/.gitignore"
+        "ws add --explain must not seed local/.gitignore"
     );
 }
 
@@ -186,7 +186,7 @@ fn invariant_6_stage_explain_creates_no_staged_toml() {
 /// threading `--explain` breaks this loudly.
 ///
 /// Read-side ops share a single fixture, so the loop is cheap.
-/// Write-side ops (init, clone, stage) have dedicated tests above
+/// Write-side ops (init, clone, add) have dedicated tests above
 /// because their fixture requirements differ.
 #[test]
 fn invariant_6_read_side_ops_announce_plan_under_explain() {
@@ -285,7 +285,7 @@ fn invariant_8_init_refuses_existing_workspace_without_force() {
 #[test]
 fn invariant_10_unknown_ws_subcommand_error_lists_every_known_subcommand() {
     const KNOWN_WS_SUBCOMMANDS: &[&str] = &[
-        "init", "status", "log", "diff", "clone", "stage", "unstage", "restore", "reset",
+        "init", "status", "log", "diff", "clone", "add", "unstage", "restore", "reset",
     ];
 
     let cfg_dir = TempDir::new().unwrap();

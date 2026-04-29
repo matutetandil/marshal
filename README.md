@@ -19,7 +19,7 @@ What's shipped today is the wrapper layer that sits on top of plain `git`, plus 
 | 0 — Foundation                | ✅ shipped (`v0.1.0`)            | Pure alias/passthrough, cross-platform CI, release plumbing.                                                         |
 | 1 — Wrapper UX                | ✅ shipped (`v0.2.0` + `v0.3.0`) | Modernization tips, actionable error hints, three-tier config, `marshal what-now`, `marshal help`, `--json` everywhere. |
 | 2 — Workspace (read-only)     | ✅ shipped (`v0.4.0`)            | `git ws` namespace: `init`, `status`, `log`, `diff`, `clone` (parallel children with progress bars), scope inference, `--explain`. |
-| 3 — Workspace modifications   | ⏳ first slice                  | The three zones (declared / staged / working). `ws stage` and `ws unstage` shipped; `ws restore` / `reset` / `commit` / `branch` / `switch` next.        |
+| 3 — Workspace modifications   | ⏳ first slice                  | The three zones (declared / staged / working). `ws add`, `ws unstage`, `ws restore`, `ws reset` shipped; `ws commit` / `branch` / `switch` next.       |
 | 4+ — Coordinated operations   | 📋 designed                     | Parallel push/pull/fetch/sync, oplog, undo, differentiating features.                                                |
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan.

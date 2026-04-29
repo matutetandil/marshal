@@ -1,7 +1,7 @@
 //! `ws unstage <repo>` — drop a previously-staged repo's snapshot
 //! from `staged.toml`.
 //!
-//! Counterpart to `ws stage`: it never touches the child repo's
+//! Counterpart to `ws add`: it never touches the child repo's
 //! working tree, only the per-developer staging file. Idempotent —
 //! unstaging a repo that was never staged succeeds with a "nothing
 //! to do" output rather than erroring, mirroring how `git restore
@@ -9,7 +9,7 @@
 //! to undo.
 //!
 //! Validates the repo against the manifest with the same shape as
-//! `ws stage`: a typo errors out cleanly with the list of known
+//! `ws add`: a typo errors out cleanly with the list of known
 //! names. The validation is a usability call, not a correctness
 //! one — unstaging an unknown repo is technically harmless (the
 //! key would simply not be in `staged.toml`) but a typo here almost
