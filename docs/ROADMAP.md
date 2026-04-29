@@ -228,7 +228,19 @@ The three zones, mental model:
   `--explain` describes the plan without invoking git. Single-
   shot only — there is no per-repo `ws commit <repo>` (use
   `ws unstage <repo>` to drop a staged entry instead).
-- [ ] Workspace branching: `ws branch <name>` with scope inference
+- [x] Workspace branching: `ws branch <name>` (thin, Slice F) —
+  the workspace-level analogue of `git branch <name>`. Creates a
+  new branch in the workspace-repo from current HEAD; child repos
+  are not touched. The new workspace branch's `state.toml` starts
+  as a copy of the parent branch's tree (git branch copies the
+  tree); the user populates the per-child mapping later via
+  `ws add` / `ws commit` on the new branch. Initial-empty refusal
+  is clearer than the raw git error; branch-already-exists
+  propagates git's diagnostic verbatim. `--on <name>` is rejected
+  (workspace-repo-only operation). The richer **granular-scope**
+  variant — auto-detect divergent children, create their branches,
+  record in state.toml — lives in Slice F.5, post Slice H so it
+  can use the parallel-execution framework.
 - [ ] Workspace switching: `ws switch <name>` with state materialization
 - [x] Pre-flight checks framework — `src/workspace/preflight.rs`
   hosts the `Obstacle` enum (tagged-enum JSON: in_progress,

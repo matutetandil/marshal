@@ -7,20 +7,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
-the three zones: declared / staged / working). Six slices
+the three zones: declared / staged / working). Seven slices
 shipped: the per-developer staging area (`ws add` /
 `ws unstage`, Slice A), its surfacing through `ws status`
 (Slice B), the first child-working-tree-write command
 (`ws restore`, Slice C), the "clear all" counterpart
 (`ws reset`, Slice D), the rename of `ws stage` to `ws add` for
-git-recursive consistency (Slice D.5), and the workspace
-commit (`ws commit`, Slice E), plus a `tests/invariants.rs`
-meta-test crate (Slice B.5) that guards the auto-checkable
-invariants from `docs/PRINCIPLES.md`. Next: `ws branch`,
-`ws switch`, plus the pre-flight + parallel-execution
-frameworks. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+git-recursive consistency (Slice D.5), the workspace commit
+(`ws commit`, Slice E), and the workspace branch (`ws branch`,
+Slice F — thin), plus a `tests/invariants.rs` meta-test crate
+(Slice B.5) that guards the auto-checkable invariants from
+`docs/PRINCIPLES.md`. Next: `ws switch` (Slice G), the granular-
+scope variant of `ws branch` (Slice F.5), and the pre-flight +
+parallel-execution refactor (Slice H). See
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
+
+- **`ws branch <name>` — thin (Slice F).** The workspace-level
+  analogue of `git branch <name>`. Creates a new branch in the
+  workspace-repo from current HEAD; child repos are not touched.
+  The new workspace branch's `state.toml` starts as a copy of the
+  parent branch's tree (because `git branch` copies the tree); the
+  user populates the per-child mapping later via the existing
+  `ws add` / `ws commit` workflow on the new branch.
+
+  A workspace branch is a git branch on the workspace-repo with
+  its own versioned `state.toml`. Different workspace branches
+  map to arbitrary per-child branch combos — one branch can have
+  alpha on `main` + beta on `feat/payments`, another can have
+  alpha on `release/2.3` + beta on `release/2.4` + gamma on
+  `release/8.3`. This command does not pre-decide what those
+  mappings are; it just makes a new workspace branch available.
+  The user moves to it (Slice G) and uses `ws add` / `ws commit`
+  to declare what THIS branch's per-child mapping should record.
+
+  Behaviour:
+
+  - `ws branch <name>` → `git -C <root> branch <name>`. No switch
+    (mirrors plain `git branch`).
+  - Initial-empty workspace-repo (no commits) is refused with a
+    hint clearer than the raw git error.
+  - Branch already exists → propagate git's diagnostic verbatim.
+  - `--on <name>` is rejected: `ws branch` operates on the
+    workspace-repo only.
+  - Positional args beyond `<name>` are rejected.
+  - `--explain` describes the plan without invoking git.
+  - JSON shape: `{root, workspace_name, branch_name, from_branch?,
+    from_commit?, explain_plan?}`.
+
+  A richer "granular scope" variant — auto-detect divergent
+  children, create child branches in them, record in state.toml
+  on the new workspace branch — lands in **Slice F.5** once the
+  parallel-execution framework (Slice H) is available. The thin
+  version preserves all the existing flows; users can still get
+  granular-scope behaviour by hand (the equivalence-of-flows
+  invariant from the design brief).
 
 - **`ws commit` (Slice E).** The workspace-level analogue of
   `git commit`. Reads `.workspace/local/staged.toml`, upserts
