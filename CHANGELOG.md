@@ -7,18 +7,76 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
-the three zones: declared / staged / working). Four slices shipped:
-the per-developer staging area (`ws add` / `ws unstage`, Slice A),
-its surfacing through `ws status` (Slice B), the first child-
-working-tree-write command (`ws restore`, Slice C), and the
-"clear all" counterpart (`ws reset`, Slice D), plus a
-`tests/invariants.rs` meta-test crate (Slice B.5) that guards the
-auto-checkable invariants from `docs/PRINCIPLES.md`. Next:
-`ws commit`, `ws branch`, `ws switch`, plus the pre-flight +
-parallel-execution frameworks. See
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+the three zones: declared / staged / working). Six slices
+shipped: the per-developer staging area (`ws add` /
+`ws unstage`, Slice A), its surfacing through `ws status`
+(Slice B), the first child-working-tree-write command
+(`ws restore`, Slice C), the "clear all" counterpart
+(`ws reset`, Slice D), the rename of `ws stage` to `ws add` for
+git-recursive consistency (Slice D.5), and the workspace
+commit (`ws commit`, Slice E), plus a `tests/invariants.rs`
+meta-test crate (Slice B.5) that guards the auto-checkable
+invariants from `docs/PRINCIPLES.md`. Next: `ws branch`,
+`ws switch`, plus the pre-flight + parallel-execution
+frameworks. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
+
+- **`ws commit` (Slice E).** The workspace-level analogue of
+  `git commit`. Reads `.workspace/local/staged.toml`, upserts
+  every entry into `.workspace/state.toml`, runs
+  `git commit -- <state-path>` against just that file, and
+  clears the staging area on success. The result: a workspace-
+  repo commit whose tree carries the new state declaration and
+  whose hash can be tagged for reproducible deploys (the
+  canonical Marshal use case).
+
+  Behaviour deliberately mirrors `git commit`:
+
+  - **Only staged contents are committed.** Other files in the
+    workspace repo's git index — Dockerfile, README, untracked
+    files — are untouched. The `git commit -- <path>` form's
+    `--only` semantics handle this for free.
+  - **Empty stage → "nothing staged".** "Every staged entry
+    already matches the declared state" is a distinct error
+    that points at `ws reset` to drop the no-op staging.
+  - **Editor support.** Without `-m`, git's commit invocation
+    inherits stdio so the user's `$EDITOR` (or `core.editor`)
+    takes over the terminal — same behaviour as plain
+    `git commit`. The commit message is read back from HEAD
+    afterwards so the JSON form still includes it.
+  - **`--json` requires `-m`.** Editor mode and structured
+    output are incompatible; we refuse the combination with a
+    clear hint.
+  - `--on <name>` and any positional are rejected — `ws commit`
+    is workspace-wide; per-repo intent is staged via
+    `ws add <repo>` ahead of the commit.
+  - First-time detail: when `state.toml` is brand new, the
+    pathspec form needs the file in the index, so we
+    `git add` it first (idempotent on already-tracked files).
+  - JSON shape: `{root, workspace_name, changes[], cleared[],
+    commit_sha?, message?, explain_plan?}`. `changes` reuses
+    the tagged-enum `StateChange` extracted to
+    `workspace/state.rs` for sharing with `ws diff`.
+
+- **`ws stage` renamed to `ws add` (Slice D.5).** The whole `ws`
+  namespace mirrors git's verbs one level up (Git Recursive
+  principle). `clone`, `init`, `status`, `log`, `diff`,
+  `restore`, `reset`, `commit`, `branch`, `switch` are all
+  git's exact words; `stage` was the one outlier when `add` is
+  git's canonical verb. Pre-1.0 we still have headroom to fix
+  this. `ws unstage` stays as-is — it is the verb users
+  typically alias git to anyway, and we preferred not to
+  overload `ws restore --staged` (which would conflate two
+  operations whose behaviour differs substantially).
+
+  Mechanical: rename `commands/ws/stage.rs` → `add.rs`
+  (`git mv`, history preserved). All `ws stage` strings, doc
+  comments, test names, and `KNOWN_WS_SUBCOMMANDS` updated.
+  Output verbs (`Staged X at …`) preserved — the past-tense
+  fact "this was placed in the staging area" reads naturally
+  regardless of which command put it there. Tagged history
+  (0.4.0) is unaffected; Phase 3 work is unreleased.
 
 - **`ws reset` (Slice D).** Clears the per-developer staging area
   in one go. The workspace-level analogue of `git reset` (the

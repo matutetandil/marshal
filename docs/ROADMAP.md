@@ -213,7 +213,21 @@ The three zones, mental model:
   an empty body. Empty-staging case is a benign no-op. Refuses
   positional arguments and `--on <name>` with a hint at
   `ws unstage` so the two commands stay semantically disjoint.
-- [ ] `ws commit` — commit staged changes as new state.toml in workspace repo
+- [x] `ws commit` — flushes the staging area into a workspace
+  commit. Reads `.workspace/local/staged.toml`, upserts every
+  entry into `.workspace/state.toml`, runs
+  `git commit -- <state-path>` (with `--only` semantics so other
+  staged paths in the workspace repo's git index stay staged),
+  and clears `staged.toml` on success. `-m <msg>` /
+  `--message <msg>` / `--message=<msg>` are accepted; without a
+  message git's commit inherits stdio so `$EDITOR` takes over the
+  terminal exactly as plain `git commit` does. Empty staging and
+  "every staged entry already matches the declared state" are
+  distinct errors with distinct hints. `--json` requires `-m`
+  (editor mode is incompatible with structured output);
+  `--explain` describes the plan without invoking git. Single-
+  shot only — there is no per-repo `ws commit <repo>` (use
+  `ws unstage <repo>` to drop a staged entry instead).
 - [ ] Workspace branching: `ws branch <name>` with scope inference
 - [ ] Workspace switching: `ws switch <name>` with state materialization
 - [x] Pre-flight checks framework — `src/workspace/preflight.rs`
