@@ -35,6 +35,7 @@ use crate::workspace::manifest::Manifest;
 use crate::workspace::state::StateDeclaration;
 
 mod add;
+mod branch;
 mod clone;
 mod commit;
 mod diff;
@@ -141,6 +142,20 @@ pub fn dispatch(
             &args[1..],
             format,
         ),
+        // `git ws branch <name>` — create a new workspace branch.
+        // Workspace-level analogue of `git branch <name>`. Thin:
+        // operates on the workspace-repo only; per-child branching
+        // is determined by state.toml content on each workspace
+        // branch (see `project_marshal_branch_full_design.md` in
+        // memory for the granular-scope variant in Slice F.5).
+        Some("branch") => run_command(
+            branch::WsBranch {
+                on: on.clone(),
+                explain,
+            },
+            &args[1..],
+            format,
+        ),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
@@ -152,8 +167,9 @@ pub fn dispatch(
                  `git ws unstage <repo>` to manage the staging area, \
                  `git ws restore <repo>` to bring a child back to \
                  its declared branch, `git ws reset` to clear the \
-                 entire staging area, or `git ws commit -m <msg>` \
-                 to flush staged → state.toml."
+                 entire staging area, `git ws commit -m <msg>` \
+                 to flush staged → state.toml, or \
+                 `git ws branch <name>` to create a workspace branch."
             );
             Ok(ExitCode::from(2))
         }

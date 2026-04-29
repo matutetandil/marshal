@@ -5062,3 +5062,203 @@ fn ws_commit_does_not_disturb_other_staged_paths() {
         .collect();
     assert_eq!(files, vec![".workspace/state.toml"]);
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws branch` — Phase 3 Slice F (thin)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Happy path: `ws branch <name>` creates the branch in the
+/// workspace-repo from current HEAD; child repos are not touched.
+#[test]
+fn ws_branch_creates_workspace_branch_only() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    // Capture child's pre-branch state to confirm it stays exactly
+    // where it was after `ws branch` runs.
+    let alpha = ws.path().join("src").join("alpha");
+    let child_branches_before = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["branch", "--list"])
+        .output()
+        .unwrap();
+    let before_text = String::from_utf8_lossy(&child_branches_before.stdout).to_string();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "feature/manolo"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "branch failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Created workspace branch `feature/manolo`"));
+    assert!(stdout.contains("ws switch feature/manolo"));
+
+    // Workspace-repo has the new branch (no switch happened — main
+    // is still current).
+    let ws_branches = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["branch", "--list"])
+        .output()
+        .unwrap();
+    let ws_branches_text = String::from_utf8_lossy(&ws_branches.stdout);
+    assert!(ws_branches_text.contains("feature/manolo"));
+    assert!(ws_branches_text.contains("* main"));
+
+    // Child repo's branches are unchanged — `ws branch` is thin.
+    let child_branches_after = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["branch", "--list"])
+        .output()
+        .unwrap();
+    let after_text = String::from_utf8_lossy(&child_branches_after.stdout).to_string();
+    assert_eq!(before_text, after_text);
+}
+
+/// Branch already exists → propagate git's error.
+#[test]
+fn ws_branch_refuses_when_branch_already_exists() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "release/2.4.8"])
+        .assert()
+        .success();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "release/2.4.8"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("already exists"),
+        "expected the git error to surface, got: {stderr}"
+    );
+}
+
+/// Workspace-repo has no commits → refuse with a clear hint
+/// (clearer than the raw git error).
+#[test]
+fn ws_branch_refuses_initial_empty_workspace() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+
+    // Hand-built workspace: git-initialised but no commits, plus
+    // the workspace marker so context detection succeeds.
+    let tmp = TempDir::new().unwrap();
+    StdCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["config", "user.email", "t@t"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["config", "user.name", "Test"])
+        .status()
+        .unwrap();
+    let workspace_dir = tmp.path().join(".workspace");
+    std::fs::create_dir(&workspace_dir).unwrap();
+    std::fs::write(
+        workspace_dir.join("manifest.toml"),
+        "[workspace]\nname = \"empty\"\ndefault_branch = \"main\"\n",
+    )
+    .unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(tmp.path())
+        .args(["ws", "branch", "feature/x"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no commits yet"),
+        "expected the initial-empty hint, got: {stderr}"
+    );
+}
+
+/// `--on <repo>` is rejected with a hint pointing at plain git
+/// in the child repo.
+#[test]
+fn ws_branch_rejects_on_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "feature/x", "--on", "alpha"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cd src/alpha"));
+}
+
+/// JSON form carries `branch_name`, `from_branch`, `from_commit`.
+#[test]
+fn ws_branch_json_carries_branch_metadata() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "feature/json-test", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["branch_name"], "feature/json-test");
+    assert_eq!(parsed["from_branch"], "main");
+    assert!(parsed["from_commit"].is_string());
+    assert_eq!(parsed["from_commit"].as_str().unwrap().len(), 40);
+    assert!(parsed.get("explain_plan").is_none());
+}
+
+/// `--explain` describes the plan without invoking git on the
+/// workspace-repo. No new branch is created.
+#[test]
+fn ws_branch_explain_does_not_create_branch() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "feature/dry-run", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws branch`"));
+    assert!(
+        stdout.contains("git branch feature/dry-run") || stdout.contains("branch feature/dry-run")
+    );
+
+    let branches = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["branch", "--list"])
+        .output()
+        .unwrap();
+    let branches_text = String::from_utf8_lossy(&branches.stdout);
+    assert!(
+        !branches_text.contains("feature/dry-run"),
+        "explain must not create the branch; branches:\n{branches_text}"
+    );
+}
