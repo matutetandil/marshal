@@ -86,6 +86,85 @@ impl StateDeclaration {
     }
 }
 
+/// One per-repo difference between two state declarations. JSON
+/// shape uses an internally-tagged `kind` field
+/// (`"added"` / `"removed"` / `"changed"`) so consumers can branch
+/// with a single switch — same precedent as
+/// `ws clone`'s `ChildResult` and `preflight::Obstacle`.
+///
+/// Consumed by `ws diff` (working tree vs HEAD) and `ws commit`
+/// (about-to-write state.toml vs current state.toml). Living here
+/// next to [`StateDeclaration`] keeps the diff logic with the data
+/// shape it operates on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StateChange {
+    Added {
+        name: String,
+        branch: String,
+    },
+    Removed {
+        name: String,
+        branch: String,
+    },
+    Changed {
+        name: String,
+        from: String,
+        to: String,
+    },
+}
+
+impl StateChange {
+    /// Repo name carried by every variant.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Added { name, .. } => name,
+            Self::Removed { name, .. } => name,
+            Self::Changed { name, .. } => name,
+        }
+    }
+}
+
+/// Diff two state declarations into a list of per-repo changes.
+/// Returns one [`StateChange`] per repo whose entry differs between
+/// `from` and `to`, sorted alphabetically by repo name so the
+/// output is predictable across invocations.
+///
+/// Currently only the `branch` field is compared — the optional
+/// `commit` field is ignored because `state.toml` treats a missing
+/// commit as "any tip of the branch", and we'd need a richer
+/// `Changed` variant to express "branch unchanged but pinned commit
+/// changed". A real use case will pull that in.
+pub fn diff_states(from: &StateDeclaration, to: &StateDeclaration) -> Vec<StateChange> {
+    use std::collections::BTreeSet;
+
+    let mut names: BTreeSet<&String> = BTreeSet::new();
+    names.extend(from.repos.keys());
+    names.extend(to.repos.keys());
+
+    let mut changes = Vec::new();
+    for name in names {
+        match (from.repos.get(name), to.repos.get(name)) {
+            (None, Some(c)) => changes.push(StateChange::Added {
+                name: name.clone(),
+                branch: c.branch.clone(),
+            }),
+            (Some(h), None) => changes.push(StateChange::Removed {
+                name: name.clone(),
+                branch: h.branch.clone(),
+            }),
+            (Some(h), Some(c)) if h.branch != c.branch => changes.push(StateChange::Changed {
+                name: name.clone(),
+                from: h.branch.clone(),
+                to: c.branch.clone(),
+            }),
+            // Same branch on both sides — not a change.
+            (Some(_), Some(_)) | (None, None) => {}
+        }
+    }
+    changes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

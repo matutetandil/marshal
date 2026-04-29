@@ -4694,3 +4694,371 @@ fn ws_reset_rejects_on_flag() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("ws unstage alpha"));
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws commit` — Phase 3 Slice E
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Commit-aware fixture: extends `make_staging_fixture` with an
+/// initial workspace-repo git commit so the workspace itself is a
+/// real git repo with a HEAD. `ws commit` cannot run against a
+/// non-git workspace root (git would refuse the commit).
+fn make_commit_fixture(child_names: &[&str]) -> TempDir {
+    let ws = make_staging_fixture(child_names);
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["config", "user.email", "t@example.com"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["config", "user.name", "Test"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["add", ".workspace/manifest.toml"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["commit", "-q", "-m", "seed workspace"])
+        .status()
+        .unwrap();
+    ws
+}
+
+/// Switch a child repo to a non-default branch with one extra
+/// commit. Returns the absolute child path.
+fn switch_child_to_named_branch(ws: &TempDir, name: &str, branch: &str) -> std::path::PathBuf {
+    let child = ws.path().join("src").join(name);
+    StdCommand::new("git")
+        .current_dir(&child)
+        .args(["switch", "-q", "-c", branch])
+        .status()
+        .unwrap();
+    std::fs::write(child.join("change.txt"), "change").unwrap();
+    StdCommand::new("git")
+        .current_dir(&child)
+        .args(["add", "change.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(&child)
+        .args(["commit", "-q", "-m", "feature change"])
+        .status()
+        .unwrap();
+    child
+}
+
+/// Happy path: stage a child on a non-default branch, commit. The
+/// state.toml is created with the staged entry, a workspace-repo
+/// commit lands on HEAD, and the staging file is cleared (header
+/// preserved).
+#[test]
+fn ws_commit_records_state_and_creates_workspace_commit() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+    switch_child_to_named_branch(&ws, "alpha", "feat/payments");
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "add", "alpha"])
+        .assert()
+        .success();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "-m", "release v1.0.0"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Committed"));
+    assert!(stdout.contains("release v1.0.0"));
+    assert!(stdout.contains("declared on `feat/payments`"));
+    assert!(stdout.contains("Cleared 1 staged entry"));
+
+    // The workspace repo's HEAD is the new commit.
+    let log = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["log", "-1", "--pretty=%s"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout).trim(),
+        "release v1.0.0"
+    );
+
+    // state.toml carries the entry.
+    let state = std::fs::read_to_string(ws.path().join(".workspace/state.toml")).unwrap();
+    assert!(state.contains("[repos.alpha]"));
+    assert!(state.contains("branch = \"feat/payments\""));
+
+    // Staging file is cleared (header preserved).
+    let staged = std::fs::read_to_string(
+        ws.path()
+            .join(".workspace")
+            .join("local")
+            .join("staged.toml"),
+    )
+    .unwrap();
+    assert!(staged.contains("# staged.toml"));
+    assert!(!staged.lines().any(|line| line.starts_with("[repos.")));
+}
+
+/// Empty staging → error with hint at `ws add <repo>`.
+#[test]
+fn ws_commit_with_empty_staging_errors_with_add_hint() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "-m", "test"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("nothing staged"));
+    assert!(stderr.contains("ws add"));
+}
+
+/// Re-staging a repo whose declared state already matches the
+/// staged values → "nothing to commit" error. Workspace analogue
+/// of `git commit` when the index has no changes.
+#[test]
+fn ws_commit_when_staged_matches_declared_errors_with_reset_hint() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+    switch_child_to_named_branch(&ws, "alpha", "feat/payments");
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "add", "alpha"])
+        .assert()
+        .success();
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "-m", "first"])
+        .assert()
+        .success();
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "add", "alpha"])
+        .assert()
+        .success();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "-m", "duplicate"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("nothing to commit"));
+    assert!(stderr.contains("ws reset"));
+}
+
+/// JSON form: `commit_sha` populated, `changes` carries per-repo
+/// entries, `cleared` lists what got promoted.
+#[test]
+fn ws_commit_json_returns_sha_and_changes_and_cleared() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha", "beta"]);
+    switch_child_to_named_branch(&ws, "alpha", "feat/x");
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "add", "alpha"])
+        .assert()
+        .success();
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "add", "beta"])
+        .assert()
+        .success();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "-m", "two repos pinned", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["message"], "two repos pinned");
+    assert!(parsed["commit_sha"].is_string());
+    assert_eq!(parsed["commit_sha"].as_str().unwrap().len(), 40);
+    let changes = parsed["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 2);
+    let cleared = parsed["cleared"].as_array().unwrap();
+    assert_eq!(cleared.len(), 2);
+    assert!(parsed.get("explain_plan").is_none());
+}
+
+/// `--json` without `-m` is rejected — editor mode is incompatible
+/// with structured output.
+#[test]
+fn ws_commit_json_without_message_is_rejected() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--json"));
+    assert!(stderr.contains("-m"));
+}
+
+/// `ws commit alpha` (a positional) is rejected with a hint at the
+/// canonical flow (`ws add` then `ws commit`).
+#[test]
+fn ws_commit_rejects_positional_with_add_hint() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "alpha", "-m", "x"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ws add"));
+}
+
+/// `--on <name>` is rejected with a hint at `ws unstage`.
+#[test]
+fn ws_commit_rejects_on_flag() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "--on", "alpha", "-m", "x"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ws unstage alpha"));
+}
+
+/// `--explain` describes the plan without writing state.toml or
+/// invoking git. Independent of staging contents — the plan is
+/// informational.
+#[test]
+fn ws_commit_explain_does_not_mutate_anything() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "--explain", "-m", "rehearsal"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws commit`"));
+    // The plan line is `git -C <abs-path> add -- <state-rel-path>`.
+    // Match on "add --" to stay path-independent.
+    assert!(
+        stdout.contains("add -- .workspace/state.toml"),
+        "expected the plan to mention git add for state.toml, got:\n{stdout}"
+    );
+    assert!(stdout.contains("commit -m"));
+
+    assert!(!ws.path().join(".workspace/state.toml").exists());
+
+    let log = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["log", "-1", "--pretty=%s"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout).trim(),
+        "seed workspace"
+    );
+}
+
+/// Other staged paths in the workspace repo's git index stay
+/// staged after `ws commit` — only `.workspace/state.toml` is
+/// committed (`git commit -- <path>`'s `--only` semantics).
+#[test]
+fn ws_commit_does_not_disturb_other_staged_paths() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_commit_fixture(&["alpha"]);
+    switch_child_to_named_branch(&ws, "alpha", "feat/x");
+
+    // Create + git-add an unrelated file at the workspace root.
+    std::fs::write(ws.path().join("README.md"), "# Hello").unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["add", "README.md"])
+        .status()
+        .unwrap();
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "add", "alpha"])
+        .assert()
+        .success();
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "-m", "pin alpha"])
+        .assert()
+        .success();
+
+    // README.md is still staged — not part of the workspace commit.
+    let status = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap();
+    let status_text = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_text
+            .lines()
+            .any(|line| line.starts_with("A  README.md")),
+        "README.md should still be staged after ws commit; got status:\n{status_text}"
+    );
+
+    // The workspace commit's diff covers only state.toml.
+    let show = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["show", "--name-only", "--pretty=", "HEAD"])
+        .output()
+        .unwrap();
+    let files: Vec<String> = String::from_utf8_lossy(&show.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.trim().to_string())
+        .collect();
+    assert_eq!(files, vec![".workspace/state.toml"]);
+}

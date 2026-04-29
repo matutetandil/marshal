@@ -36,6 +36,7 @@ use crate::workspace::state::StateDeclaration;
 
 mod add;
 mod clone;
+mod commit;
 mod diff;
 mod init;
 mod log;
@@ -127,6 +128,19 @@ pub fn dispatch(
             &args[1..],
             format,
         ),
+        // `git ws commit` — flush staging into a workspace commit.
+        // Workspace-level analogue of `git commit`. Receives the
+        // active output format because `--json` + editor mode is
+        // incompatible and we surface a clean error.
+        Some("commit") => run_command(
+            commit::WsCommit {
+                on: on.clone(),
+                explain,
+                format,
+            },
+            &args[1..],
+            format,
+        ),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
@@ -137,8 +151,9 @@ pub fn dispatch(
                  to clone a workspace, `git ws add <repo>` / \
                  `git ws unstage <repo>` to manage the staging area, \
                  `git ws restore <repo>` to bring a child back to \
-                 its declared branch, or `git ws reset` to clear \
-                 the entire staging area."
+                 its declared branch, `git ws reset` to clear the \
+                 entire staging area, or `git ws commit -m <msg>` \
+                 to flush staged → state.toml."
             );
             Ok(ExitCode::from(2))
         }

@@ -38,7 +38,7 @@ use crate::cli::{Command, Renderable};
 use crate::context::{self, STATE_FILE, WORKSPACE_MARKER};
 use crate::workspace::manifest::Manifest;
 use crate::workspace::scope::{self, ScopePolicy};
-use crate::workspace::state::StateDeclaration;
+use crate::workspace::state::{self, StateChange, StateDeclaration};
 
 pub struct WsDiff {
     /// `--on <name>` from the dispatcher. When set, the change
@@ -140,7 +140,7 @@ impl Command for WsDiff {
             ScopePolicy::full_workspace(),
         )?;
 
-        let mut changes = compute_changes(&head, &current);
+        let mut changes = state::diff_states(&head, &current);
         if self.on.is_some() {
             changes.retain(|c| scope_for_filter.contains(&c.name().to_string()));
         }
@@ -181,41 +181,6 @@ fn load_state_at_head(workspace_root: &Path) -> Result<StateDeclaration> {
     StateDeclaration::parse(&content).context("failed to parse the version of state.toml at HEAD")
 }
 
-/// Walk both versions, emit one [`StateChange`] per repo name that
-/// differs. Sorted alphabetically by repo name so the output is
-/// predictable across invocations.
-fn compute_changes(head: &StateDeclaration, current: &StateDeclaration) -> Vec<StateChange> {
-    use std::collections::BTreeSet;
-
-    let mut names: BTreeSet<&String> = BTreeSet::new();
-    names.extend(head.repos.keys());
-    names.extend(current.repos.keys());
-
-    let mut changes = Vec::new();
-    for name in names {
-        match (head.repos.get(name), current.repos.get(name)) {
-            (None, Some(c)) => changes.push(StateChange::Added {
-                name: name.clone(),
-                branch: c.branch.clone(),
-            }),
-            (Some(h), None) => changes.push(StateChange::Removed {
-                name: name.clone(),
-                branch: h.branch.clone(),
-            }),
-            (Some(h), Some(c)) if h.branch != c.branch => changes.push(StateChange::Changed {
-                name: name.clone(),
-                from: h.branch.clone(),
-                to: c.branch.clone(),
-            }),
-            // Same branch on both sides — not a change. (We don't
-            // diff the optional `commit` field yet; that's a
-            // refinement once a use case shows up.)
-            (Some(_), Some(_)) | (None, None) => {}
-        }
-    }
-    changes
-}
-
 #[derive(Serialize)]
 pub struct WsDiffOutput {
     pub workspace: WorkspaceInfo,
@@ -231,27 +196,6 @@ pub struct WsDiffOutput {
 pub struct WorkspaceInfo {
     pub root: String,
     pub name: String,
-}
-
-/// One per-repo state change. JSON shape uses an externally-tagged
-/// `kind` field (`"added"` / `"removed"` / `"changed"`) so consumers
-/// can branch with a single switch.
-#[derive(Serialize, Debug, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum StateChange {
-    Added {
-        name: String,
-        branch: String,
-    },
-    Removed {
-        name: String,
-        branch: String,
-    },
-    Changed {
-        name: String,
-        from: String,
-        to: String,
-    },
 }
 
 impl Renderable for WsDiffOutput {
@@ -317,16 +261,6 @@ impl Renderable for WsDiffOutput {
     }
 }
 
-impl StateChange {
-    fn name(&self) -> &str {
-        match self {
-            Self::Added { name, .. } => name,
-            Self::Removed { name, .. } => name,
-            Self::Changed { name, .. } => name,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,14 +287,14 @@ mod tests {
     fn no_changes_yields_empty_vec() {
         let head = state_with(&[("a", "main")]);
         let current = state_with(&[("a", "main")]);
-        assert!(compute_changes(&head, &current).is_empty());
+        assert!(state::diff_states(&head, &current).is_empty());
     }
 
     #[test]
     fn additions_when_repo_only_in_current() {
         let head = state_with(&[]);
         let current = state_with(&[("svc", "feat/x")]);
-        let changes = compute_changes(&head, &current);
+        let changes = state::diff_states(&head, &current);
         assert_eq!(changes.len(), 1);
         assert_eq!(
             changes[0],
@@ -375,7 +309,7 @@ mod tests {
     fn removals_when_repo_only_in_head() {
         let head = state_with(&[("svc", "main")]);
         let current = state_with(&[]);
-        let changes = compute_changes(&head, &current);
+        let changes = state::diff_states(&head, &current);
         assert_eq!(changes.len(), 1);
         assert_eq!(
             changes[0],
@@ -390,7 +324,7 @@ mod tests {
     fn changed_when_branch_differs() {
         let head = state_with(&[("svc", "main")]);
         let current = state_with(&[("svc", "feat/payment")]);
-        let changes = compute_changes(&head, &current);
+        let changes = state::diff_states(&head, &current);
         assert_eq!(changes.len(), 1);
         assert_eq!(
             changes[0],
@@ -406,7 +340,7 @@ mod tests {
     fn changes_are_sorted_alphabetically() {
         let head = state_with(&[("zeta", "main"), ("alpha", "main")]);
         let current = state_with(&[("zeta", "feat/y"), ("alpha", "feat/x")]);
-        let changes = compute_changes(&head, &current);
+        let changes = state::diff_states(&head, &current);
         assert_eq!(changes.len(), 2);
         // Alpha first, then zeta, regardless of HEAD insertion order.
         match &changes[0] {
@@ -424,7 +358,7 @@ mod tests {
         let head = state_with(&[("a", "main"), ("b", "main")]);
         let current = state_with(&[("a", "feat/x"), ("c", "main")]);
         // `a` changed, `b` removed, `c` added.
-        let changes = compute_changes(&head, &current);
+        let changes = state::diff_states(&head, &current);
         assert_eq!(changes.len(), 3);
         // Sorted: a, b, c.
         match &changes[0] {
