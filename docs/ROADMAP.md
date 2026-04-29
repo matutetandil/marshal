@@ -207,7 +207,12 @@ The three zones, mental model:
   including which resolution step would run on a dirty tree.
   Single-repo only this slice — multi-repo `ws restore --all`
   waits for the parallel-execution framework.
-- [ ] `ws reset` — clear staging
+- [x] `ws reset` — clears the per-developer staging area in one
+  go. Counterpart to `ws unstage <repo>` (single-repo). Rewrites
+  `.workspace/local/staged.toml` with the header preserved and
+  an empty body. Empty-staging case is a benign no-op. Refuses
+  positional arguments and `--on <name>` with a hint at
+  `ws unstage` so the two commands stay semantically disjoint.
 - [ ] `ws commit` — commit staged changes as new state.toml in workspace repo
 - [ ] Workspace branching: `ws branch <name>` with scope inference
 - [ ] Workspace switching: `ws switch <name>` with state materialization

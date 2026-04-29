@@ -7,17 +7,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
-the three zones: declared / staged / working). Three slices
-shipped: the per-developer staging area (`ws stage` / `ws unstage`,
-Slice A), its surfacing through `ws status` (Slice B), and the
-first child-working-tree-write command (`ws restore`, Slice C),
-plus a `tests/invariants.rs` meta-test crate (Slice B.5) that
-guards the auto-checkable invariants from `docs/PRINCIPLES.md`.
-Next: `ws reset`, `ws commit`, `ws branch`, `ws switch`, plus the
-pre-flight + parallel-execution frameworks. See
+the three zones: declared / staged / working). Four slices shipped:
+the per-developer staging area (`ws stage` / `ws unstage`, Slice A),
+its surfacing through `ws status` (Slice B), the first child-
+working-tree-write command (`ws restore`, Slice C), and the
+"clear all" counterpart (`ws reset`, Slice D), plus a
+`tests/invariants.rs` meta-test crate (Slice B.5) that guards the
+auto-checkable invariants from `docs/PRINCIPLES.md`. Next:
+`ws commit`, `ws branch`, `ws switch`, plus the pre-flight +
+parallel-execution frameworks. See
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
+
+- **`ws reset` (Slice D).** Clears the per-developer staging area
+  in one go. The workspace-level analogue of `git reset` (the
+  mode that empties the index without touching the working tree).
+  - Reads `staged.toml` (or treats missing as empty), drops every
+    entry, rewrites the file with the header preserved and an
+    empty body. The file's existence becomes a stable invariant
+    once the first stage runs — `cat staged.toml` keeps showing
+    the documentation comment after a reset.
+  - Empty-staging case is benign: `was_empty: true`, message
+    "Staging area was already empty — nothing to do.", no error.
+  - `ws reset <repo>` and `ws reset --on <repo>` are rejected
+    with a hint at `ws unstage <repo>`. Keeps the two commands
+    semantically disjoint: `ws reset` for "clear all",
+    `ws unstage` for "drop one".
+  - `--explain` describes the load → drop → write plan.
+  - JSON shape: `{root, cleared: [{name, branch, commit}, …],
+    was_empty, explain_plan?}`. `cleared` is sorted alphabetically
+    so the output is stable across invocations.
+  - Side-effect on `StagedDeclaration`: the `repos` field gains
+    `skip_serializing_if = "HashMap::is_empty"` so the post-reset
+    file body is empty rather than `[repos]` empty-table noise.
+    Round-trip stays correct because `#[serde(default)]` rehydrates
+    the empty map on read.
 
 - **`ws restore <repo>` (Slice C).** First Phase 3 command that
   writes to a child repo's working tree. Switches the named child
