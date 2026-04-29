@@ -44,6 +44,7 @@ mod log;
 mod reset;
 mod restore;
 mod status;
+mod switch;
 mod unstage;
 
 /// Threshold for "show full list inline" vs "show count + interesting only".
@@ -156,6 +157,18 @@ pub fn dispatch(
             &args[1..],
             format,
         ),
+        // `git ws switch <name>` — switch the workspace to a
+        // different workspace branch and materialise its state.toml
+        // across child repos. Workspace-level analogue of
+        // `git switch <branch>`.
+        Some("switch") => run_command(
+            switch::WsSwitch {
+                on: on.clone(),
+                explain,
+            },
+            &args[1..],
+            format,
+        ),
         Some(other) => {
             eprintln!(
                 "ws: unknown subcommand '{other}'. \
@@ -168,8 +181,9 @@ pub fn dispatch(
                  `git ws restore <repo>` to bring a child back to \
                  its declared branch, `git ws reset` to clear the \
                  entire staging area, `git ws commit -m <msg>` \
-                 to flush staged → state.toml, or \
-                 `git ws branch <name>` to create a workspace branch."
+                 to flush staged → state.toml, `git ws branch <name>` \
+                 to create a workspace branch, or \
+                 `git ws switch <name>` to switch + materialise state."
             );
             Ok(ExitCode::from(2))
         }

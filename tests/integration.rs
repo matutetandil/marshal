@@ -5262,3 +5262,257 @@ fn ws_branch_explain_does_not_create_branch() {
         "explain must not create the branch; branches:\n{branches_text}"
     );
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// `ws switch` — Phase 3 Slice G
+// ───────────────────────────────────────────────────────────────────────────
+
+/// `ws switch`-aware fixture: extends `make_commit_fixture` with a
+/// `.gitignore` that excludes `src/` from the workspace-repo. Child
+/// repos are independent gits; treating them as gitlinks would
+/// contaminate the workspace's status.
+fn make_switch_fixture(child_names: &[&str]) -> TempDir {
+    let ws = make_staging_fixture(child_names);
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["init", "--quiet", "--initial-branch=main"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["config", "user.email", "t@example.com"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["config", "user.name", "Test"])
+        .status()
+        .unwrap();
+    std::fs::write(ws.path().join(".gitignore"), "src/\n.workspace/local/\n").unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["add", ".gitignore", ".workspace/manifest.toml"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["commit", "-q", "-m", "seed workspace"])
+        .status()
+        .unwrap();
+    ws
+}
+
+fn child_branch(child: &std::path::Path) -> String {
+    let out = StdCommand::new("git")
+        .current_dir(child)
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// Round-trip happy path: ws branch + switch + populate state.toml
+/// on the new branch + switch back. Children follow per-branch
+/// state.toml across switches.
+#[test]
+fn ws_switch_round_trip_materialises_state_per_branch() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_switch_fixture(&["alpha", "beta"]);
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "feature/manolo"])
+        .assert()
+        .success();
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "feature/manolo"])
+        .assert()
+        .success();
+
+    let beta = ws.path().join("src").join("beta");
+    StdCommand::new("git")
+        .current_dir(&beta)
+        .args(["switch", "-q", "-c", "feat/carlitos"])
+        .status()
+        .unwrap();
+    std::fs::write(beta.join("b.txt"), "x").unwrap();
+    StdCommand::new("git")
+        .current_dir(&beta)
+        .args(["add", "b.txt"])
+        .status()
+        .unwrap();
+    StdCommand::new("git")
+        .current_dir(&beta)
+        .args(["commit", "-q", "-m", "carlitos work"])
+        .status()
+        .unwrap();
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "add", "beta"])
+        .assert()
+        .success();
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "commit", "-m", "manolo: beta on carlitos"])
+        .assert()
+        .success();
+
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "main"])
+        .assert()
+        .success();
+    assert_eq!(child_branch(&beta), "main");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "feature/manolo"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Switched workspace"));
+    assert!(stdout.contains("`main` → `feat/carlitos`"));
+    assert_eq!(child_branch(&beta), "feat/carlitos");
+}
+
+/// `-c` creates the workspace branch from current HEAD and switches
+/// to it in one go.
+#[test]
+fn ws_switch_create_short_flag_creates_and_switches() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_switch_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "-c", "feat/new"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Created and switched"));
+
+    let head = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "feat/new");
+}
+
+/// Pre-flight refuses dirty repos without a resolution flag — and
+/// nothing is mutated.
+#[test]
+fn ws_switch_refuses_dirty_repo_atomically() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_switch_fixture(&["alpha"]);
+    marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "branch", "feature/x"])
+        .assert()
+        .success();
+
+    let alpha = ws.path().join("src").join("alpha");
+    StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["switch", "-q", "-c", "feat/wip"])
+        .status()
+        .unwrap();
+    std::fs::write(alpha.join("seed.txt"), "modified").unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "feature/x"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "switch should refuse dirty repos without a resolution flag"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--auto-stash"));
+    assert!(stderr.contains("--discard-changes"));
+
+    assert_eq!(child_branch(&alpha), "feat/wip");
+    let head = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+}
+
+/// Switching to a non-existent branch propagates a clear error.
+#[test]
+fn ws_switch_unknown_branch_errors_clearly() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_switch_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "ghost/branch"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("ghost/branch"),
+        "expected the failed branch name to surface, got: {stderr}"
+    );
+}
+
+/// `--explain` describes the plan without invoking git.
+#[test]
+fn ws_switch_explain_does_not_mutate() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_switch_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "--explain", "feature/dry-run"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws switch`"));
+    // Plan line: `git -C <abs-path> show feature/dry-run:...`
+    assert!(
+        stdout.contains("show feature/dry-run:.workspace/state.toml"),
+        "expected the plan to mention the state.toml read, got:\n{stdout}"
+    );
+    assert!(stdout.contains("switch feature/dry-run"));
+
+    let head = StdCommand::new("git")
+        .current_dir(ws.path())
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+}
+
+/// `ws switch` rejects two positional branch names.
+#[test]
+fn ws_switch_rejects_two_positionals() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_switch_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "switch", "a", "b"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("too many positional"));
+}
