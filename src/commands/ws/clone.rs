@@ -23,7 +23,7 @@
 //! child invocation — without running anything.
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::ProgressBar;
 use serde::Serialize;
 use std::ffi::OsString;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -34,6 +34,7 @@ use std::time::Instant;
 use crate::cli::{Command, Renderable};
 use crate::context::{MANIFEST_FILE, WORKSPACE_MARKER};
 use crate::workspace::manifest::{Manifest, RepoEntry};
+use crate::workspace::parallel;
 
 pub struct WsClone {
     pub explain: bool,
@@ -152,81 +153,60 @@ fn clone_workspace(url: &str, dest: &Path) -> Result<()> {
 
 // ── Children clone (parallel, indicatif progress bars) ────────────
 
-/// Coordinates the parallel child-repo clones. One thread per repo,
-/// one [`ProgressBar`] per repo under a shared [`MultiProgress`].
-/// `std::thread::scope` lets us borrow `manifest_repos` and the
-/// bars without forcing `'static`.
+/// Coordinates the parallel child-repo clones via the shared
+/// [`workspace::parallel`](crate::workspace::parallel) framework.
+/// The framework owns thread spawning, bar setup, and result
+/// ordering; this function only describes the per-child work
+/// (clone, time it, build a [`ChildResult`]).
 fn clone_children_parallel(workspace_root: &Path, repos: &[RepoEntry]) -> Vec<ChildResult> {
-    if repos.is_empty() {
-        return Vec::new();
-    }
-
-    let multi = MultiProgress::new();
-    let bar_style = progress_bar_style();
-    let prefix_width = repos.iter().map(|r| r.name.len()).max().unwrap_or(0).max(8);
-
-    // Pre-create one bar per repo so they appear together immediately
-    // (rather than streaming in as threads start).
-    let bars: Vec<ProgressBar> = repos
-        .iter()
-        .map(|repo| {
-            let bar = multi.add(ProgressBar::new(0));
-            bar.set_style(bar_style.clone());
-            bar.set_prefix(format!("{:<width$}", repo.name, width = prefix_width));
-            bar.set_message("queued");
-            bar
-        })
-        .collect();
-
-    // The work: each thread clones one repo and updates its bar.
-    // Results are collected in declaration order so the JSON output
-    // is stable across runs.
-    let results: Vec<ChildResult> = std::thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(repos.len());
-        for (repo, bar) in repos.iter().zip(bars.iter()) {
+    let outcomes = parallel::execute(
+        repos,
+        |repo| repo.name.clone(),
+        |repo, bar| {
             let abs_path = workspace_root.join(repo_relative_path(repo));
             let url = repo.url.clone();
             let name = repo.name.clone();
             let display_path = abs_path.to_string_lossy().into_owned();
-            let bar_handle = bar.clone();
-            handles.push(scope.spawn(move || {
-                let started = Instant::now();
-                let outcome = clone_one_with_progress(&url, &abs_path, &bar_handle);
-                let duration_ms = started.elapsed().as_millis();
-                match outcome {
-                    Ok(()) => {
-                        bar_handle
-                            .finish_with_message(format!("✓ cloned in {}", format_ms(duration_ms)));
-                        ChildResult::Success {
-                            name,
-                            url,
-                            path: display_path,
-                            duration_ms,
-                        }
-                    }
-                    Err(err) => {
-                        let msg = err.to_string();
-                        // Truncate noisy multi-line errors to a single
-                        // line on the bar; full error stays in the
-                        // JSON `error` field for machine consumers.
-                        let one_line = msg.lines().next().unwrap_or(&msg).to_string();
-                        bar_handle.finish_with_message(format!("✗ failed: {one_line}"));
-                        ChildResult::Failed {
-                            name,
-                            url,
-                            path: display_path,
-                            error: msg,
-                        }
+
+            let started = Instant::now();
+            let outcome = clone_one_with_progress(&url, &abs_path, bar);
+            let duration_ms = started.elapsed().as_millis();
+
+            Ok(match outcome {
+                Ok(()) => {
+                    bar.finish_with_message(format!(
+                        "✓ cloned in {}",
+                        parallel::format_ms(duration_ms)
+                    ));
+                    ChildResult::Success {
+                        name,
+                        url,
+                        path: display_path,
+                        duration_ms,
                     }
                 }
-            }));
-        }
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
+                Err(err) => {
+                    let msg = err.to_string();
+                    // Truncate noisy multi-line errors to a single
+                    // line on the bar; full error stays in the
+                    // JSON `error` field for machine consumers.
+                    let one_line = msg.lines().next().unwrap_or(&msg).to_string();
+                    bar.finish_with_message(format!("✗ failed: {one_line}"));
+                    ChildResult::Failed {
+                        name,
+                        url,
+                        path: display_path,
+                        error: msg,
+                    }
+                }
+            })
+        },
+    );
 
-    // Make sure every bar has a final state and the multi cleared its
-    // line so subsequent stdout writes are not interleaved with bars.
-    let _ = multi.clear();
+    // Each work closure always returns Ok — clone-failure is encoded
+    // as `ChildResult::Failed` rather than as a framework-level Err,
+    // so the outcome list never carries Err here. unwrap is safe.
+    let results: Vec<ChildResult> = outcomes.into_iter().map(|r| r.unwrap()).collect();
 
     results
 }
@@ -425,22 +405,6 @@ fn parse_progress(line: &str) -> Option<(String, u64, u64)> {
     }
 
     None
-}
-
-fn progress_bar_style() -> ProgressStyle {
-    // Docker-style: green spinner, name padded, fixed-width bar,
-    // counts, then a free-form trailing message.
-    ProgressStyle::with_template("{spinner:.green} {prefix} [{bar:30.cyan/blue}] {pos}/{len} {msg}")
-        .unwrap_or_else(|_| ProgressStyle::default_bar())
-        .progress_chars("=> ")
-}
-
-fn format_ms(ms: u128) -> String {
-    if ms < 1000 {
-        format!("{ms}ms")
-    } else {
-        format!("{:.1}s", (ms as f64) / 1000.0)
-    }
 }
 
 // ── Path helpers ──────────────────────────────────────────────────
@@ -784,15 +748,5 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.to_string().contains("too many positional"));
-    }
-
-    #[test]
-    fn format_ms_sub_second() {
-        assert_eq!(format_ms(523), "523ms");
-    }
-
-    #[test]
-    fn format_ms_seconds() {
-        assert_eq!(format_ms(1500), "1.5s");
     }
 }
