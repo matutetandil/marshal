@@ -7,7 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Work in progress on `0.5.0` — Phase 3 (workspace modifications,
-the three zones: declared / staged / working). Eight slices
+the three zones: declared / staged / working). Nine slices
 shipped: the per-developer staging area (`ws add` /
 `ws unstage`, Slice A), its surfacing through `ws status`
 (Slice B), the first child-working-tree-write command
@@ -15,14 +15,107 @@ shipped: the per-developer staging area (`ws add` /
 (`ws reset`, Slice D), the rename of `ws stage` to `ws add` for
 git-recursive consistency (Slice D.5), the workspace commit
 (`ws commit`, Slice E), the workspace branch (`ws branch`,
-Slice F — thin), and the workspace-aware switch (`ws switch`,
-Slice G), plus a `tests/invariants.rs` meta-test crate
-(Slice B.5) that guards the auto-checkable invariants from
-`docs/PRINCIPLES.md`. Next: the granular-scope variant of
-`ws branch` (Slice F.5) and the pre-flight + parallel-execution
-refactor (Slice H). See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Slice F — thin), the workspace-aware switch (`ws switch`,
+Slice G), and the framework consolidation pass plus the
+multi-repo restore (`ws restore --all`, Slice H), plus a
+`tests/invariants.rs` meta-test crate (Slice B.5) that guards
+the auto-checkable invariants from `docs/PRINCIPLES.md`. Next:
+the granular-scope variant of `ws branch` (Slice F.5).
+See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Added
+
+- **`ws restore --all` (Slice H4).** Multi-repo restore:
+  switches every declared child to its declared branch in one
+  operation. Atomic pre-flight across the whole scope (read
+  every child's state before any mutation; abort cleanly with
+  one aggregated error if any child has a blocking obstacle),
+  then parallel execution via `workspace::parallel`. Resolution
+  flags `--auto-stash` / `--discard-changes` apply uniformly
+  across every affected child — the user picks one stance for
+  the whole operation.
+
+  Behaviour:
+
+  - **Skip-when-aligned.** A child already on its declared
+    branch is reported as `skipped: true` without invoking git;
+    it is excluded from the blocker computation entirely (dirty
+    state in those children is irrelevant because they are not
+    touched).
+  - **Missing on disk.** Children declared in the manifest but
+    not cloned are surfaced in the result (`missing_from_disk:
+    true`); not blocking — the message points at `ws clone`.
+  - **Atomic refusal.** A blocking obstacle in any child aborts
+    the whole op before any mutation, with a single error that
+    lists every obstacle marked ✗ (blocking) / ✓ (cleared by
+    current flags). No child is mutated on refusal.
+  - **`--all` and a positional `<repo>` are mutually exclusive.**
+    Either restore one named child or every declared child;
+    per-child filtering when using `--all` is not exposed (the
+    single-repo form is the per-child filter).
+  - **`--explain` describes the multi-repo plan** (read manifest
+    + state.toml → atomic pre-flight per child → parallel
+    `git switch` per affected child) without reading state or
+    invoking git.
+  - **JSON shape:** untagged enum
+    `WsRestoreOutput { Single | All }`. The `Single` variant
+    serializes byte-equivalently to the pre-Slice-H struct
+    (single-repo contract preserved). The `All` variant carries
+    `{root, workspace_name, children: [{name, path,
+    declared_branch, from_branch?, to_branch, skipped,
+    missing_from_disk, stashed, discarded}], explain_plan?}`.
+
+### Changed (refactor — no user-visible behaviour change)
+
+- **Pre-flight checks become a Strategy + Registry (Slice H1).**
+  The monolithic `obstacles(state)` function in
+  `src/workspace/preflight.rs` is decomposed into a
+  `PreflightCheck` trait with one `impl` per obstacle kind under
+  `preflight/checks/` (in_progress, conflicts, initial_empty,
+  staged, unstaged, untracked). `register_defaults` composes
+  them in rendering order. Public API
+  (`workspace::preflight::{Obstacle, obstacles}`) is unchanged —
+  existing consumers (`ws restore`, `ws switch`) compile without
+  edits. Adding a new obstacle is one new file plus one
+  registration line, in line with Invariant 10. Tests grow from
+  7 to 21 in the preflight tree (the original 7 public-API tests
+  stay verbatim, plus per-check unit tests, plus a Registry
+  composability test using a synthetic check).
+
+- **Parallel execution framework (Slice H2).**
+  `src/workspace/parallel.rs` hosts a generic `execute<R, T, F>`
+  that runs `work(item, bar)` in parallel for every item with
+  one [`indicatif::ProgressBar`] under one shared
+  `MultiProgress`, returns results in declaration order, and
+  tolerates partial failures (Invariant 5). Threading via
+  `std::thread::scope`. Helpers `bar_style()` and `format_ms()`
+  are exposed so every consumer renders identically. `ws clone`
+  migrates first: `clone_children_parallel` shrinks from ~70
+  lines of threading + bar boilerplate to a single
+  `parallel::execute` call wrapping the per-child work.
+
+- **`ws switch` migrates to the parallel framework (Slice H3).**
+  The per-child for-loop is replaced with a `parallel::execute`
+  call. Each child's resolve-obstacles + `git switch` runs in
+  its own thread under one shared MultiProgress; bars surface
+  status per child (`resolving obstacles`, `switching to
+  <branch>`, `✓ switched to <branch> in <ms>`). The atomic
+  pre-flight is unchanged. Subtle behaviour shift: on a per-
+  child failure, sequential execution left children N+1..K
+  untouched; with parallel, they are attempted in their own
+  threads regardless. The user-visible op result still
+  propagates the first error, matching today's UX. This trade-
+  off favours progress over strict atomicity (consistent with
+  Invariant 5 and the user's ability to re-run idempotently).
+
+- **Single-repo `ws restore` Output is now an untagged enum.**
+  Internal type rename: `WsRestoreOutput` → enum with
+  `Single(WsRestoreSingleOutput) | All(WsRestoreAllOutput)`.
+  `#[serde(untagged)]` keeps Single's JSON shape identical to
+  the pre-refactor struct. Existing single-repo tests pass
+  unmodified.
+
+
 
 - **`ws switch <name>` (Slice G).** The workspace-level analogue
   of `git switch <branch>`. Switches the workspace-repo and

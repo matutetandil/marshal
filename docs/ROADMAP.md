@@ -193,20 +193,27 @@ The three zones, mental model:
 - [x] `ws unstage <repo>` — drop the entry from `staged.toml`.
   Idempotent: unstaging a never-staged repo is a no-op, not an
   error.
-- [x] `ws restore <repo>` — bring a child back to the declared
-  branch (state.toml override or manifest default). First Phase 3
-  command that writes to a child working tree. Pre-flight gates
-  the operation: hard blockers (in-progress merge / rebase /
-  cherry-pick / revert / bisect, working-tree conflicts,
-  initial-empty repo) refuse unconditionally; soft blockers
-  (uncommitted changes) refuse by default and are resolved via
-  the mutually-exclusive `--auto-stash` (preserve via
+- [x] `ws restore (<repo> | --all)` — bring child repos back to
+  the declared branch (state.toml override or manifest default).
+  Single-repo form (`<repo>` positional) shipped in Slice C as
+  the first Phase 3 command that writes to a child working
+  tree; multi-repo form (`--all`) shipped in Slice H4 on top of
+  the consolidated parallel framework. Pre-flight gates both:
+  hard blockers (in-progress merge / rebase / cherry-pick /
+  revert / bisect, working-tree conflicts, initial-empty repo)
+  refuse unconditionally; soft blockers (uncommitted changes)
+  refuse by default and are resolved via the mutually-exclusive
+  `--auto-stash` (preserve via
   `git stash push --include-untracked`) or `--discard-changes`
-  (destructive `git reset --hard` + `git clean -fd`). Already-on-
-  declared is a clean no-op; `--explain` describes the plan
-  including which resolution step would run on a dirty tree.
-  Single-repo only this slice — multi-repo `ws restore --all`
-  waits for the parallel-execution framework.
+  (destructive `git reset --hard` + `git clean -fd`). In
+  `--all` mode, pre-flight is atomic across every declared
+  child (any blocking obstacle aborts the whole op before any
+  mutation); resolution flags apply uniformly across the scope.
+  Already-on-declared children are skipped without invoking git
+  (skip-when-aligned); children declared but missing on disk
+  are surfaced as `missing_from_disk: true` without blocking.
+  `--explain` describes the plan; in `--all` mode it covers the
+  multi-repo flow.
 - [x] `ws reset` — clears the per-developer staging area in one
   go. Counterpart to `ws unstage <repo>` (single-repo). Rewrites
   `.workspace/local/staged.toml` with the header preserved and
@@ -258,16 +265,28 @@ The three zones, mental model:
   always switches). Sequential implementation; Slice H will
   consolidate the parallel-execution framework that `ws switch`,
   `ws clone`, and the granular-scope `ws branch` will share.
-- [x] Pre-flight checks framework — `src/workspace/preflight.rs`
+- [x] Pre-flight checks framework — `src/workspace/preflight/`
   hosts the `Obstacle` enum (tagged-enum JSON: in_progress,
   conflicts, staged_changes, unstaged_changes, untracked_files,
-  initial_empty), the per-state `obstacles(state)` classifier,
+  initial_empty), the per-state `obstacles(state)` entry point,
   and the `is_hard_blocker` / `cleared_by_auto_stash` /
-  `cleared_by_discard` predicates. Single consumer today
-  (`ws restore`); Slice H consolidates the framework into a
-  Strategy + Registry shared by every coordinated multi-repo
-  operation.
-- [ ] Parallel execution framework with error aggregation
+  `cleared_by_discard` predicates. Slice H1 refactored the
+  monolithic detection function into a `PreflightCheck` Strategy
+  + Registry per Invariant 10: each obstacle has its own impl
+  in `preflight/checks/`, registered in rendering order by
+  `register_defaults`. Public API unchanged — adding a new
+  obstacle is one new file plus one registration line.
+- [x] Parallel execution framework with error aggregation —
+  `src/workspace/parallel.rs` hosts the generic
+  `execute<R, T, F>` that runs per-item work in parallel under
+  one shared `indicatif::MultiProgress` (one `ProgressBar` per
+  item), returns results in declaration order, and tolerates
+  partial failures (Invariant 5). Threading via
+  `std::thread::scope`. Shared bar style + `format_ms` helpers
+  guarantee identical UX across consumers. Migrated in Slice H:
+  `ws clone` (H2), `ws switch` per-child phase (H3), and the
+  newly-added `ws restore --all` (H4). `ws branch` granular
+  scope (Slice F.5) reuses the same framework.
 
 **Deliverable:** complete workspace model operational. Developers can create workspaces, work in them, curate state, and coordinate changes across repos.
 
