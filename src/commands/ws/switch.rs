@@ -35,6 +35,7 @@ use crate::cli::{Command, Renderable};
 use crate::context;
 use crate::git::porcelain::RepoState;
 use crate::workspace::manifest::{Manifest, RepoEntry};
+use crate::workspace::parallel;
 use crate::workspace::preflight::{self, Obstacle};
 use crate::workspace::state::StateDeclaration;
 
@@ -252,71 +253,108 @@ impl Command for WsSwitch {
         let from_branch = workspace_state.branch.name.clone();
         let from_commit = workspace_state.branch.oid.clone();
 
-        // ── 6. Per-child materialisation ─────────────────────────
-        let mut children_summaries: Vec<ChildSwitchSummary> = Vec::new();
-        for (child, state) in child_states {
-            // Missing on disk: report and skip.
-            let Some(state) = state else {
-                children_summaries.push(ChildSwitchSummary {
-                    name: child.name,
-                    path: child.path.to_string_lossy().into_owned(),
-                    from_branch: None,
-                    to_branch: child.target_branch,
-                    skipped: false,
-                    missing_from_disk: true,
-                    stashed: false,
-                    discarded: false,
-                });
-                continue;
-            };
-            // Already on target.
-            if state.branch.name.as_deref() == Some(child.target_branch.as_str()) {
-                children_summaries.push(ChildSwitchSummary {
-                    name: child.name,
-                    path: child.path.to_string_lossy().into_owned(),
-                    from_branch: state.branch.name,
-                    to_branch: child.target_branch,
-                    skipped: true,
-                    missing_from_disk: false,
-                    stashed: false,
-                    discarded: false,
-                });
-                continue;
-            }
+        // ── 6. Per-child materialisation (parallel) ──────────────
+        //
+        // Each child is its own thread under a shared MultiProgress.
+        // Pre-flight already validated atomically across the whole
+        // scope; the per-child work here is resolve-obstacles +
+        // git switch + summary, in any order. Ordering of the
+        // returned summaries matches `child_states` declaration
+        // order so the JSON output is stable.
+        //
+        // Failure semantics: the framework returns one Result per
+        // child; collecting via `Result<Vec<_>>` propagates the
+        // first Err. With sequential execution, a failure on
+        // child N left children N+1..K untouched; with parallel,
+        // they run in their own threads regardless. The user-
+        // visible op result still propagates the first error,
+        // matching today's UX.
+        let auto_stash = parsed.auto_stash;
+        let discard = parsed.discard;
+        let outcomes = parallel::execute(
+            &child_states,
+            |(plan, _)| plan.name.clone(),
+            |(child, state), bar| -> Result<ChildSwitchSummary> {
+                let started = std::time::Instant::now();
 
-            // Resolve obstacles for this child (if any).
-            let obs = preflight::obstacles(&state);
-            let resolution = resolve_obstacles(
-                &child.path,
-                &obs,
-                parsed.auto_stash,
-                parsed.discard,
-                &format!("`{}`", child.name),
-            )?;
+                // Missing on disk: report and skip.
+                let Some(state) = state.as_ref() else {
+                    bar.finish_with_message("missing on disk");
+                    return Ok(ChildSwitchSummary {
+                        name: child.name.clone(),
+                        path: child.path.to_string_lossy().into_owned(),
+                        from_branch: None,
+                        to_branch: child.target_branch.clone(),
+                        skipped: false,
+                        missing_from_disk: true,
+                        stashed: false,
+                        discarded: false,
+                    });
+                };
 
-            run_git(
-                &child.path,
-                &["switch", &child.target_branch],
-                &format!("git switch {}", child.target_branch),
-            )
-            .with_context(|| {
-                format!(
-                    "while materialising child `{}` to branch `{}`",
-                    child.name, child.target_branch
+                // Already on target.
+                if state.branch.name.as_deref() == Some(child.target_branch.as_str()) {
+                    bar.finish_with_message("✓ already on target");
+                    return Ok(ChildSwitchSummary {
+                        name: child.name.clone(),
+                        path: child.path.to_string_lossy().into_owned(),
+                        from_branch: state.branch.name.clone(),
+                        to_branch: child.target_branch.clone(),
+                        skipped: true,
+                        missing_from_disk: false,
+                        stashed: false,
+                        discarded: false,
+                    });
+                }
+
+                // Resolve obstacles (if any).
+                let obs = preflight::obstacles(state);
+                if !obs.is_empty() {
+                    bar.set_message("resolving obstacles");
+                }
+                let resolution = resolve_obstacles(
+                    &child.path,
+                    &obs,
+                    auto_stash,
+                    discard,
+                    &format!("`{}`", child.name),
+                )?;
+
+                // Switch.
+                bar.set_message(format!("switching to {}", child.target_branch));
+                run_git(
+                    &child.path,
+                    &["switch", &child.target_branch],
+                    &format!("git switch {}", child.target_branch),
                 )
-            })?;
+                .with_context(|| {
+                    format!(
+                        "while materialising child `{}` to branch `{}`",
+                        child.name, child.target_branch
+                    )
+                })?;
 
-            children_summaries.push(ChildSwitchSummary {
-                name: child.name,
-                path: child.path.to_string_lossy().into_owned(),
-                from_branch: state.branch.name,
-                to_branch: child.target_branch,
-                skipped: false,
-                missing_from_disk: false,
-                stashed: resolution.stashed,
-                discarded: resolution.discarded,
-            });
-        }
+                bar.finish_with_message(format!(
+                    "✓ switched to {} in {}",
+                    child.target_branch,
+                    parallel::format_ms(started.elapsed().as_millis())
+                ));
+
+                Ok(ChildSwitchSummary {
+                    name: child.name.clone(),
+                    path: child.path.to_string_lossy().into_owned(),
+                    from_branch: state.branch.name.clone(),
+                    to_branch: child.target_branch.clone(),
+                    skipped: false,
+                    missing_from_disk: false,
+                    stashed: resolution.stashed,
+                    discarded: resolution.discarded,
+                })
+            },
+        );
+
+        let children_summaries: Vec<ChildSwitchSummary> =
+            outcomes.into_iter().collect::<Result<Vec<_>>>()?;
 
         Ok(WsSwitchOutput {
             root: ctx.root.to_string_lossy().into_owned(),
