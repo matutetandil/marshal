@@ -4527,6 +4527,223 @@ fn ws_restore_rejects_on_flag() {
     assert!(stderr.contains("ws restore alpha"));
 }
 
+/// `ws restore --all` happy path: every declared child sitting on
+/// a non-default branch is moved to the manifest's default branch.
+#[test]
+fn ws_restore_all_restores_every_declared_child() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta", "gamma"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+    let beta = switch_child_off_default(&ws, "beta");
+    let gamma = switch_child_off_default(&ws, "gamma");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--all"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "restore --all failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Restored `alpha`"));
+    assert!(stdout.contains("Restored `beta`"));
+    assert!(stdout.contains("Restored `gamma`"));
+
+    // All three children land on main.
+    for child in [&alpha, &beta, &gamma] {
+        let head = StdCommand::new("git")
+            .current_dir(child)
+            .args(["branch", "--show-current"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+    }
+}
+
+/// Mix of children: one already on declared branch, one diverged.
+/// `ws restore --all` skips the aligned one and restores the other.
+#[test]
+fn ws_restore_all_skips_already_aligned_children() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+    // alpha stays on main (already declared); beta is moved off.
+    let _beta = switch_child_off_default(&ws, "beta");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--all"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("`alpha` already on declared branch"));
+    assert!(stdout.contains("Restored `beta`"));
+}
+
+/// Atomic refusal: when one child is dirty without a resolution
+/// flag, the whole operation refuses and no other child is mutated.
+#[test]
+fn ws_restore_all_refuses_atomically_on_dirty_child() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+    let beta = switch_child_off_default(&ws, "beta");
+    // Make beta dirty.
+    std::fs::write(beta.join("seed.txt"), "modified").unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--all"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "restore --all should refuse atomically when a child is dirty without flag"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("pre-flight"));
+    assert!(stderr.contains("Child `beta`"));
+    assert!(stderr.contains("--auto-stash"));
+
+    // alpha was NOT mutated (still on the diverged branch).
+    let head = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&head.stdout).trim(),
+        "feat/restore-test",
+        "alpha should remain on its branch — atomic refusal must not mutate"
+    );
+}
+
+/// `--all --auto-stash` resolves uncommitted changes in every dirty
+/// child and proceeds.
+#[test]
+fn ws_restore_all_auto_stash_preserves_changes_and_switches() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+    std::fs::write(alpha.join("seed.txt"), "modified").unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--all", "--auto-stash"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "restore --all --auto-stash failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("stashed"));
+
+    let stash_list = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["stash", "list"])
+        .output()
+        .unwrap();
+    let stash_text = String::from_utf8_lossy(&stash_list.stdout);
+    assert!(stash_text.contains("marshal/ws-restore"));
+}
+
+/// A declared child missing on disk is surfaced (not blocking) and
+/// other children are restored normally.
+#[test]
+fn ws_restore_all_surfaces_missing_children_without_blocking() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+    // Remove beta from disk to simulate "declared but not cloned".
+    std::fs::remove_dir_all(ws.path().join("src").join("beta")).unwrap();
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--all"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "restore --all should not fail on a missing child"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Restored `alpha`"));
+    assert!(stdout.contains("missing on disk"));
+    assert!(stdout.contains("`beta`"));
+
+    // alpha is on main.
+    let head = StdCommand::new("git")
+        .current_dir(&alpha)
+        .args(["branch", "--show-current"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), "main");
+}
+
+/// `--explain --all` describes the multi-repo plan without mutating
+/// anything.
+#[test]
+fn ws_restore_all_explain_does_not_mutate() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha", "beta"]);
+    let alpha = switch_child_off_default(&ws, "alpha");
+    let beta = switch_child_off_default(&ws, "beta");
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--all", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Plan for `ws restore --all`"));
+    assert!(stdout.contains("manifest.toml"));
+    assert!(stdout.contains("state.toml"));
+    assert!(stdout.contains("atomic refusal"));
+
+    // Neither child moved.
+    for child in [&alpha, &beta] {
+        let head = StdCommand::new("git")
+            .current_dir(child)
+            .args(["branch", "--show-current"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&head.stdout).trim(),
+            "feat/restore-test"
+        );
+    }
+}
+
+/// `--all` and a positional `<repo>` are mutually exclusive.
+#[test]
+fn ws_restore_all_with_positional_is_rejected() {
+    let cfg_dir = TempDir::new().unwrap();
+    let cfg_path = cfg_dir.path().join("config.toml");
+    let ws = make_staging_fixture(&["alpha"]);
+
+    let output = marshal_with_isolated_config(&cfg_path)
+        .current_dir(ws.path())
+        .args(["ws", "restore", "--all", "alpha"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("mutually exclusive"));
+    assert!(stderr.contains("--all"));
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // `ws reset` — Phase 3 Slice D
 // ───────────────────────────────────────────────────────────────────────────

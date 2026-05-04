@@ -110,10 +110,12 @@ pub fn dispatch(
         // `git ws unstage <repo>` — drop the staging entry for a
         // previously-staged repo. Idempotent.
         Some("unstage") => run_command(unstage::WsUnstage { explain }, &args[1..], format),
-        // `git ws restore <repo>` — bring a child repo back to the
-        // declared branch (state.toml override or manifest default).
+        // `git ws restore (<repo> | --all)` — bring child repos
+        // back to their declared branches. The global `--all` flag
+        // doubles as restore's "every declared child" selector.
         Some("restore") => run_command(
             restore::WsRestore {
+                all,
                 on: on.clone(),
                 explain,
             },
