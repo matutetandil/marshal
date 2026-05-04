@@ -1630,8 +1630,16 @@ fn init_child_repo(path: &std::path::Path) {
         .args(["add", "."])
         .status()
         .unwrap();
+    // Pin the seed commit to a fixed early date so log-order tests
+    // remain deterministic. Without this, the seed inherits the
+    // system clock and tests that rely on later commits sorting
+    // before the seed (e.g. the dated-commits log assertions) flip
+    // when the calendar moves past the loop's hardcoded month.
+    let seed_date = "2026-01-01 00:00:00";
     StdCommand::new("git")
         .current_dir(path)
+        .env("GIT_AUTHOR_DATE", seed_date)
+        .env("GIT_COMMITTER_DATE", seed_date)
         .args(["commit", "-q", "-m", "seed"])
         .status()
         .unwrap();
