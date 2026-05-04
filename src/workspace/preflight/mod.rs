@@ -43,9 +43,7 @@ pub struct Registry {
 
 impl Registry {
     pub fn new() -> Self {
-        Self {
-            checks: Vec::new(),
-        }
+        Self { checks: Vec::new() }
     }
 
     pub fn register<C: PreflightCheck + 'static>(&mut self, check: C) -> &mut Self {
